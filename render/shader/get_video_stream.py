@@ -45,7 +45,6 @@ def main():
     finally:
         # Ensure cleanup always runs
         cam.stop()
-        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

@@ -1,1 +1,6 @@
-
+mask_mode=2
+radius_px=220
+feather_px=120
+filter_strength=1.0
+fullscreen=0
+fps=60

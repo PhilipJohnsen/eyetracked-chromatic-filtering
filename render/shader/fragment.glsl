@@ -53,20 +53,17 @@ float peripheralWeight(float distPx) {
 
 
 
-//Implement gaze-dependent chromatic filter here
-
-
-
-
 
 void main() {
-    vec3 original = texture(uFrame, vUV).rgb;
 
     float distPx = gazeDistancePx(vUV);
     float w = peripheralWeight(distPx) * clamp(uFilterStrength, 0.0, 1.0);
 
-    vec3 filtered = chromaticFilter(vUV);
-
+    //Get the original and filtered colour and mix them with weight w
+    vec3 original = texture(uFrame, vUV).rgb;
+    vec3 filtered = texture(uFiltered,vUV).rgb;
     vec3 outRgb = mix(original, filtered, w);
+
+    //Output new fragcolor
     FragColor = vec4(outRgb, 1.0);
 }

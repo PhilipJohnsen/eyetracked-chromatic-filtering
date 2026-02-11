@@ -107,41 +107,179 @@ class GasusianBlurRenderer:
       raise FileNotFoundError(blur_glsl_path)
 
     #core VAO
-
+    self.vao = glGenVertexArrays(1)
+    glBindVertexArray(self.vao)
+    
     #programs
-
+    self.prog_h = _compile_blur_program(blur_glsl_path, "H")
+    self.prog_v = _compile_blur_program(blur_glsl_path, "V")
+    
     #textures
+    self.tex_in = _create_rgb8_texture(self.w,self.h)
+    self.tex_temp = _create_rgb8_texture(self.w,self.h)
+    self.tex_out = _create_rgb8_texture(self.w, self.h)
 
     #FBO for pass 1 and 2(output)
+    self.fbo_temp = _create_fbo_with_color_tex(self.tex_temp)
+    self.fbo_out = _create_fbo_with_color_tex(self.tex_out)
 
     #Cache uniform for programs
+    self._cache_uniforms()
 
-
-    #load parameters
-
+    #load parameters CURRENTLY STATIC IMPLEMENT SETTINGS LOAD IF NEEDED
+    self.set_params(radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)
 
     #fixed texel size
-
+    self._set_texel_size(self.prog_h)
+    self._set_texel_size(self.prog_v)
+                    
     #clean binds for futur
-
+    glBindVertexArray(0)
+                    
   #Set the uniforms
+  def _cache_uniforms(self):
+    self.loc={}
+
+    def getloc(prog, name):
+      loc = glGetUniformLocation(prog,name)
+      if loc<0 : 
+        raise RuntimeError(f"Uniform '{name}' not found in program {prog}")
+      return loc
+
+      #Use same uniforms for both programs
+      for tag,prog in (("h", self.prog_h), ("v", self.prog_v)):
+        self.loc[(tag, "uInput")] = getloc(prog, "uInput")
+        self.loc[(tag, "uTexelSize")] = getloc(prog, "uTexelSize")
+        self.loc[(tag, "uRadiusRGB")] = getloc(prog, "uRadiusRGB")
+        self.loc[(tag, "uSigmaRGB")] = getloc(prog, "uSigmaRGB")
+
+        #Bind sampler to texture unit 0 once
+        glUseProgram(prog)
+        glUniform1i(self.loc[(tag, "uInput")], 0)
+        glUseProgram(0)
+
 
   #Set the texel size
-
+  def _set_texel_size(self, prog:int):
+    tag = "h" if prog==self.prog_h else "v"
+    glUseProgram(prog)
+    glUniform2f(self.loc[(tag,"uTexelSize)], 1.0/self.w, 1.0/self.h)
+    glUseProgram(0)
 
 
   #Load parameters from /init/settings.txt
+  def _set_params(self, radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)):
+    rR, rG, rB = map(int, radius_rgb)
+    sR, sG, sB = map(float, sigma_rgb)
 
+    for tag, prog in (("h", self.prog_h), ("v", self.prog_v)):
+        glUseProgram(prog)
+        glUniform3i(self.loc[(tag, "uRadiusRGB")], rR, rG, rB)
+        glUniform3f(self.loc[(tag, "uSigmaRGB")], sR, sG, sB)
+        glUseProgram(0)
 
   #Upload the frame
+  def upload_frame(self, frame_rgb: np.ndarray):
+    """uploads the RGB uint8 frame to self.tex_in
+      frame_rgb shape is (H,W,3) uint8 for the 3 color channels."""
 
+    if frame_rgb is None:
+      raise ValueError("FrameRGB is None")
+    if frame_rgb.dtype != np.uint8 or frame_rgb.ndim != 3 or frame_rgb.shape[2] != 3:
+      raise ValueError(f"Expected uint8 HxWx3 RGB, got dtype={frame_rgb.dtype}, shape={frame_rgb.shape}")
+    if frame_rgb.shape[0] != self.h or frame_rgb.shape[1] != self.w:
+      raise ValueError(f"Frame size {frame_rgb.shape[1]}x{frame_rgb.shape[0]} != renderer {self.w}x{self.h}")
+    if not frame_rgb.flags["C_CONTIGUOUS"]:
+        frame_rgb = np.ascontiguousarray(frame_rgb)
+
+    glBindTexture(GL_TEXTURE_2D, self.tex_in)
+    glPixelStorei(GL_UNPACK_ALIGNMENT,1) #specified byte alignment for the 3 channels
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.w, self.h, GL_RGB, GL_UNSIGNED_BYTE, frame_rgb)
+    glBindTexture(GL_TEXTURE_2D, 0)
 
   #Draw the fullscreen
-
+  def _draw_fullscreen(self):
+    glBindVertexArray(self.vao)
+    glDrawArrays(GL_TRIANGLES,0,3)
+    glBindVertexArray(0)
 
   #Process the pipeline for the blur
+  def process(self, frame_rgb: np.ndarray) -> int:
+    """Full GPU pipeline for blur of one frame.
+            upload -> blur horizontal -> blur vertical -> output filtered image
+        Returns: 
+            GL texture ID of blurred output (called self.tex_out)
+    """
+      # 1) upload the frame
+      self.upload_frame(frame_rgb)
+      glDisable(GL_DEPTH_TEST) #no need for z buffering test
+      glViewport(0, 0, self.w, self.h) #specify viewport 
+
+      # 2) Horizontal pass: tex_in -> tex_tmp
+            #specifically DIR is H
+      glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_tmp)
+      glUseProgram(self.prog_h)
+      glActiveTexture(GL_TEXTURE0)
+      glBindTexture(GL_TEXTURE_2D, self.tex_in)
+      self._draw_fullscreen()
+
+      # 3) Vertical pass: tex_tmp -> tex_out
+              #specifically DIR is V
+      glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
+      glUseProgram(self.prog_v)
+      glActiveTexture(GL_TEXTURE0)
+      glBindTexture(GL_TEXTURE_2D, self.tex_tmp)
+      self._draw_fullscreen()
+
+      # Unbind the textures, now that the frame is filtered
+      glBindTexture(GL_TEXTURE_2D, 0)
+      glUseProgram(0)
+      glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+      #return the GL tex ID of the filtered output
+      return self.tex_out
 
 
   #Read back the output of the image for debugging to the CPU, should be computed to the same integers as the previous CPU based renderer
+  def readback_output(self) -> np.ndarray:
+    """
+    Reads back the blurred output to the CPU. This is a slow process, but will verify correctness
+    Same output from GPU render as previous CPU render with same frame and settings verifies correctness
+    """
+    glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
+    glReadBuffer(GL_COLOR_ATTACHMENT0)
+
+    buf = glReadPixels(0,0,self.w,self.h, GL_RGB, GL_UNSIGNED_BYTE)
+    glBindFramebuffer(GL_FRAMEBUFFER,0)
+
+    img = np.frombuffer(buf, dtype=np.uint8).reshape((self.hj,self.w,3))
+    #direction flip for coordinates to match CPU, cause openGL does bottom to top
+    img = np.flipud(img).copy()
+    return img
+
 
   #Cleanup after 
+  def cleanup(self):
+    #Programs and textures
+    glDeleteProgram(self.prog_h)
+    glDeleteProgram(self.prog_v)
+    glDeleteTextures([self.tex_in, self.tex_temp, self.tex_out])
+
+    #Framebuffers and vertex array object
+    glDeleteFramebuffers(2, [self.fbo_temp, fbo_out])
+    glDeleteVertexArrays(1, [self.vao])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

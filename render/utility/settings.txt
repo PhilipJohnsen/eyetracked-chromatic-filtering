@@ -1,0 +1,13 @@
+# Eye-tracked Chromatic Filtering Settings
+# Lines starting with # are comments and ignored
+
+target_fps = 60
+force_rgb = False
+capture_format = "rgb"
+debug_gl_finish = True
+gl_finish_interval = 60
+overlay_size = 2560, 1440
+overlay_pos = 0, 0
+radius_rgb = 0, 2, 6
+sigma_rgb = 0.001, 1.0, 3.0
+shader_path = "shader/blur.glsl"

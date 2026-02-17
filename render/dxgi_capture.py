@@ -1,32 +1,33 @@
 """
 dxgi_capture.py (DXcam backend)
 
-Uses DXcam (Desktop Duplication API) to capture frames.
+Uses DXcam (Desktop Duplication API)implementation written purely in python to capture frames.
 DXcam respects WDA_EXCLUDEFROMCAPTURE in the desktop duplication path.
+DXcam uses the desktop duplication API from Windows, and will thus respect the windows based flag.
+Furthermore, DXcam has high performance, reaching 1080p240 on an Nvidia RTX 3090 GPU, with tabs and code running (according to author of DXcam)
 
 Requirements:
   - Windows 10+
   - pip install dxcam numpy opencv-python
 
 Notes:
-  - DXcam returns frames as numpy arrays; format can be BGR(A) or RGB(A)
-    depending on DXcam version. This implementation assumes BGR (cv2-friendly)
-    and optionally converts to RGB when requested.
+  - DXcam returns frames as numpy arrays;
+  - Arrays are output in RGB format when downstream needs RGB inputs
 """
 
+#Imports needed
 import time
 from typing import Optional
-
 import numpy as np
 import cv2
 import dxcam
 
+#Debugging flag, true while in development, will select False when deployment is ready
 DEBUG_DXCAM = True
 
 
 class DXCamCapture:
     """DXcam-based capture that returns frames for CV processing."""
-
     def __init__(self, output_idx: int = 0, target_fps: Optional[int] = None):
         self.output_idx = output_idx
         self.target_fps = target_fps
@@ -38,11 +39,10 @@ class DXCamCapture:
         self.camera = dxcam.create(output_idx=self.output_idx)
         if self.camera is None:
             raise RuntimeError("DXcam.create failed: no camera returned")
-
         if self.target_fps:
-            self.camera.start(target_fps=self.target_fps, video_mode=True)
+            #Video_mode ensures a smooth 60fps capture, even when idle or no new movement. Can cause performance overhead
+            self.camera.start(target_fps=self.target_fps, video_mode=True) 
             self._running = True
-
 
     def get_frame(self, rgb: bool = False) -> Optional[np.ndarray]:
         """Capture a frame.
@@ -55,44 +55,37 @@ class DXCamCapture:
         """
         if self.camera is None:
             return None
-
         if self._running:
             frame = self.camera.get_latest_frame()
         else:
             frame = self.camera.grab()
-
         if frame is None:
             return None
 
-        # Many DXcam builds return BGR(A). Convert to RGB if requested.
+        #DXcam returns BGR(A). Convert to RGB if flagged.
         if rgb:
             if frame.shape[-1] == 4:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
             else:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
+        #A frame was obtained, return the np.ndarray
         return frame
 
     def stop(self) -> None:
         """Stop capture and release camera."""
         if self.camera is None:
             return
-
         if self._running:
             try:
                 self.camera.stop()
             except Exception:
                 pass
-
         self.camera = None
         self._running = False
 
-
 _capture = None
 
-
 def capture_desktop_excluding_hwnd(
-    exclude_hwnd=None,
     output_idx: int = 0,
     target_fps: Optional[int] = None,
     rgb: bool = False,
@@ -102,7 +95,6 @@ def capture_desktop_excluding_hwnd(
     Uses Desktop Duplication under the hood and respects WDA_EXCLUDEFROMCAPTURE.
 
     Args:
-        exclude_hwnd: Ignored (DXGI handles WDA_EXCLUDEFROMCAPTURE)
         output_idx: Monitor index to capture.
         target_fps: If set, uses a background capture thread.
         rgb: Convert output to RGB.

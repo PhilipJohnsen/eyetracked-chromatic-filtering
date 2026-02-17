@@ -61,22 +61,20 @@ vec3 sampleRGB(vec2 uv){
 //channels are weighted separably
 //only one texture fetch, just use the RGB values from the same sample
 vec3 blurSeparableGaussian(vec2 uv){
-  int rR=clamp(u.RadiusRGB.r, 0, MAX_RADIUS);
-
   //clamp to avoid unsafe values
   int radiusR = clamp(uRadiusRGB.r, 0, MAX_RADIUS);
   int radiusG = clamp(uRadiusRGB.g, 0, MAX_RADIUS);
-  int radiusB = clamp(uRadiusRGB.r, 0, MAX_RADIUS);
+  int radiusB = clamp(uRadiusRGB.b, 0, MAX_RADIUS);
 
   //separate sigma to each channel
-  float sigmaR = uSigmaRGB.R;
-  float sigmaG = uSigmaRGB.G;
-  float sigmaB = uSigmaRGB.B;
+  float sigmaR = uSigmaRGB.r;
+  float sigmaG = uSigmaRGB.g;
+  float sigmaB = uSigmaRGB.b;
 
   //if radius 0 then go thru unaffected
-  float nR = (radiusR == 0) ? 1.0 : gaussNorm(rR, sR);
-  float nG = (radiusG == 0) ? 1.0 : gaussNorm(rG, sG);
-  float nB = (radiusB == 0) ? 1.0 : gaussNorm(rB, sB);
+  float nR = (radiusR == 0) ? 1.0 : gaussNorm(radiusR, sigmaR);
+  float nG = (radiusG == 0) ? 1.0 : gaussNorm(radiusG, sigmaG);
+  float nB = (radiusB == 0) ? 1.0 : gaussNorm(radiusB, sigmaB);
 
   //accumulator for the three colour values
   vec3 accumulator = vec3(0.0);
@@ -99,7 +97,7 @@ for (int i=1; i<=MAX_RADIUS; i++){
     if (i > radiusR && i>radiusG && i>radiusB) break;
 
     //Which pixels are we going to?
-    vec2 offset = float(i)*(uTexelSize * BLUR_BIR);
+    vec2 offset = float(i)*(uTexelSize * BLUR_DIR);
 
     //Sample the points
     vec3 c1 = sampleRGB(uv+offset);

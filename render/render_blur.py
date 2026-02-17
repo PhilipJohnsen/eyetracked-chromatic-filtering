@@ -1,6 +1,7 @@
 import os
 import ctypes
 import numpy as np
+import time
 
 from OpenGL.GL import *
 from OpenGL.GL.shaders import compileProgram, compileShader
@@ -34,12 +35,19 @@ def _compile_blur_program(blur_glsl_path: str, blur_dir: str) ->int:
 
   blur_src = _load_text(blur_glsl_path) #get the string of the path to use in call later
 
+  # Insert #define after #version line
+  lines = blur_src.split('\n', 1)
+  version_line = lines[0] if len(lines) > 0 else ""
+  rest = lines[1] if len(lines) > 1 else ""
+  
   if blur_dir == "H":
-    frag_src = "#define BLUR_DIR vec2(1.0,0.0)\n" + blur_src
+    blur_define = "#define BLUR_DIR vec2(1.0,0.0)"
   elif blur_dir == "V":
-    frag_src = "#define BLUR_DIR vec2(0.0,1.0)\n"+blur_src
+    blur_define = "#define BLUR_DIR vec2(0.0,1.0)"
   else:
-    raise ValueError("Wrong value for blur_dir, should be 'H' or 'V'
+    raise ValueError("Wrong value for blur_dir, should be 'H' or 'V'")
+
+  frag_src = version_line + "\n" + blur_define + "\n" + rest
 
   return compileProgram( #use the glsl shader compiler
       compileShader(FULLSCREEN_VERT, GL_VERTEX_SHADER),
@@ -64,11 +72,11 @@ def _create_rgb8_texture(w: int, h: int) -> int:
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
 
-  #repeat border to avoid blur kernel issues, repeating border allows filtering corner pixels, and averages to a good viewing result
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT)
+  #clamp to edge to avoid edge artifacts and drift
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
 
-  glBindtexture(GL_TEXTURE_2D, 0)
+  glBindTexture(GL_TEXTURE_2D, 0)
   return tex
 
 #Create a framebuffer object with the RGB values
@@ -86,6 +94,21 @@ def _create_fbo_with_color_tex(color_tex: int) -> int:
   return fbo
 
 
+def _check_fbo_status(tag: str) -> None:
+  status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+  if status != GL_FRAMEBUFFER_COMPLETE:
+    print(f"[gl] FBO incomplete {tag}: status=0x{status:x}")
+
+
+def _check_gl_error(tag: str) -> None:
+  err = glGetError()
+  if err == GL_NO_ERROR:
+    return
+  while err != GL_NO_ERROR:
+    print(f"[gl] error {tag}: 0x{err:04x}")
+    err = glGetError()
+
+
 #Gaussian blur
 #----------------------
 class GasusianBlurRenderer:
@@ -99,9 +122,10 @@ class GasusianBlurRenderer:
   """
   
   #Initialize gaussian blur
-  def __init__(self, width:int, height:int, blur_glsl_path: str):
+  def __init__(self, width:int, height:int, blur_glsl_path: str, input_format: int = GL_RGB):
     self.w=int(width)
     self.h=int(height)
+    self.input_format = input_format
 
     if not os.path.exists(blur_glsl_path):
       raise FileNotFoundError(blur_glsl_path)
@@ -127,7 +151,7 @@ class GasusianBlurRenderer:
     self._cache_uniforms()
 
     #load parameters CURRENTLY STATIC IMPLEMENT SETTINGS LOAD IF NEEDED
-    self.set_params(radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)
+    self.set_params(radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0))
 
     #fixed texel size
     self._set_texel_size(self.prog_h)
@@ -135,6 +159,9 @@ class GasusianBlurRenderer:
                     
     #clean binds for futur
     glBindVertexArray(0)
+
+    self._upload_count = 0
+    self._upload_log_every = 120
                     
   #Set the uniforms
   def _cache_uniforms(self):
@@ -146,29 +173,29 @@ class GasusianBlurRenderer:
         raise RuntimeError(f"Uniform '{name}' not found in program {prog}")
       return loc
 
-      #Use same uniforms for both programs
-      for tag,prog in (("h", self.prog_h), ("v", self.prog_v)):
-        self.loc[(tag, "uInput")] = getloc(prog, "uInput")
-        self.loc[(tag, "uTexelSize")] = getloc(prog, "uTexelSize")
-        self.loc[(tag, "uRadiusRGB")] = getloc(prog, "uRadiusRGB")
-        self.loc[(tag, "uSigmaRGB")] = getloc(prog, "uSigmaRGB")
+    #Use same uniforms for both programs
+    for tag,prog in (("h", self.prog_h), ("v", self.prog_v)):
+      self.loc[(tag, "uInput")] = getloc(prog, "uInput")
+      self.loc[(tag, "uTexelSize")] = getloc(prog, "uTexelSize")
+      self.loc[(tag, "uRadiusRGB")] = getloc(prog, "uRadiusRGB")
+      self.loc[(tag, "uSigmaRGB")] = getloc(prog, "uSigmaRGB")
 
-        #Bind sampler to texture unit 0 once
-        glUseProgram(prog)
-        glUniform1i(self.loc[(tag, "uInput")], 0)
-        glUseProgram(0)
+      #Bind sampler to texture unit 0 once
+      glUseProgram(prog)
+      glUniform1i(self.loc[(tag, "uInput")], 0)
+      glUseProgram(0)
 
 
   #Set the texel size
   def _set_texel_size(self, prog:int):
     tag = "h" if prog==self.prog_h else "v"
     glUseProgram(prog)
-    glUniform2f(self.loc[(tag,"uTexelSize)], 1.0/self.w, 1.0/self.h)
+    glUniform2f(self.loc[(tag,"uTexelSize")], 1.0/self.w, 1.0/self.h)
     glUseProgram(0)
 
 
   #Load parameters from /init/settings.txt
-  def _set_params(self, radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)):
+  def set_params(self, radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)):
     rR, rG, rB = map(int, radius_rgb)
     sR, sG, sB = map(float, sigma_rgb)
 
@@ -180,21 +207,34 @@ class GasusianBlurRenderer:
 
   #Upload the frame
   def upload_frame(self, frame_rgb: np.ndarray):
-    """uploads the RGB uint8 frame to self.tex_in
-      frame_rgb shape is (H,W,3) uint8 for the 3 color channels."""
+    """Uploads the uint8 frame to self.tex_in.
+      frame_rgb shape is (H,W,3|4) uint8, format controlled by input_format."""
 
     if frame_rgb is None:
       raise ValueError("FrameRGB is None")
-    if frame_rgb.dtype != np.uint8 or frame_rgb.ndim != 3 or frame_rgb.shape[2] != 3:
-      raise ValueError(f"Expected uint8 HxWx3 RGB, got dtype={frame_rgb.dtype}, shape={frame_rgb.shape}")
+    if frame_rgb.dtype != np.uint8 or frame_rgb.ndim != 3 or frame_rgb.shape[2] not in (3, 4):
+      raise ValueError(f"Expected uint8 HxWx3/4, got dtype={frame_rgb.dtype}, shape={frame_rgb.shape}")
     if frame_rgb.shape[0] != self.h or frame_rgb.shape[1] != self.w:
       raise ValueError(f"Frame size {frame_rgb.shape[1]}x{frame_rgb.shape[0]} != renderer {self.w}x{self.h}")
     if not frame_rgb.flags["C_CONTIGUOUS"]:
         frame_rgb = np.ascontiguousarray(frame_rgb)
 
+    if frame_rgb.shape[2] == 3 and self.input_format not in (GL_RGB, GL_BGR):
+      raise ValueError("input_format must be GL_RGB or GL_BGR for 3-channel input")
+    if frame_rgb.shape[2] == 4 and self.input_format not in (GL_RGBA, GL_BGRA):
+      raise ValueError("input_format must be GL_RGBA or GL_BGRA for 4-channel input")
+
     glBindTexture(GL_TEXTURE_2D, self.tex_in)
     glPixelStorei(GL_UNPACK_ALIGNMENT,1) #specified byte alignment for the 3 channels
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.w, self.h, GL_RGB, GL_UNSIGNED_BYTE, frame_rgb)
+    self._upload_count += 1
+    if self._upload_count == 1:
+      print("[gl] starting first glTexSubImage2D", flush=True)
+    t0 = time.perf_counter()
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.w, self.h, self.input_format, GL_UNSIGNED_BYTE, frame_rgb)
+    dt_ms = (time.perf_counter() - t0) * 1000.0
+    if self._upload_count == 1 or dt_ms > 10.0 or (self._upload_count % self._upload_log_every) == 0:
+      print(f"[gl] glTexSubImage2D took {dt_ms:.2f} ms (count={self._upload_count})", flush=True)
+    _check_gl_error("after glTexSubImage2D")
     glBindTexture(GL_TEXTURE_2D, 0)
 
   #Draw the fullscreen
@@ -210,34 +250,52 @@ class GasusianBlurRenderer:
         Returns: 
             GL texture ID of blurred output (called self.tex_out)
     """
-      # 1) upload the frame
-      self.upload_frame(frame_rgb)
-      glDisable(GL_DEPTH_TEST) #no need for z buffering test
-      glViewport(0, 0, self.w, self.h) #specify viewport 
+    # 1) upload the frame
+    self.upload_frame(frame_rgb)
+    glDisable(GL_DEPTH_TEST) #no need for z buffering test
 
-      # 2) Horizontal pass: tex_in -> tex_tmp
-            #specifically DIR is H
-      glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_tmp)
-      glUseProgram(self.prog_h)
-      glActiveTexture(GL_TEXTURE0)
-      glBindTexture(GL_TEXTURE_2D, self.tex_in)
-      self._draw_fullscreen()
+    # Save previous viewport to avoid leaking GL state into the main display
+    prev_viewport = glGetIntegerv(GL_VIEWPORT)
+    # set viewport for the FBO passes (match the FBO/texture size)
+    glViewport(0, 0, self.w, self.h)
 
-      # 3) Vertical pass: tex_tmp -> tex_out
-              #specifically DIR is V
-      glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
-      glUseProgram(self.prog_v)
-      glActiveTexture(GL_TEXTURE0)
-      glBindTexture(GL_TEXTURE_2D, self.tex_tmp)
-      self._draw_fullscreen()
+    # 2) Horizontal pass: tex_in -> tex_temp
+          #specifically DIR is H
+    glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_temp)
+    _check_fbo_status("horizontal pass")
+    glClearColor(0.0, 0.0, 0.0, 1.0)
+    glClear(GL_COLOR_BUFFER_BIT)
+    glUseProgram(self.prog_h)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, self.tex_in)
+    self._draw_fullscreen()
 
-      # Unbind the textures, now that the frame is filtered
-      glBindTexture(GL_TEXTURE_2D, 0)
-      glUseProgram(0)
-      glBindFramebuffer(GL_FRAMEBUFFER, 0)
+    # 3) Vertical pass: tex_temp -> tex_out
+            #specifically DIR is V
+    glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
+    _check_fbo_status("vertical pass")
+    glClearColor(0.0, 0.0, 0.0, 1.0)
+    glClear(GL_COLOR_BUFFER_BIT)
+    glUseProgram(self.prog_v)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, self.tex_temp)
+    self._draw_fullscreen()
 
-      #return the GL tex ID of the filtered output
-      return self.tex_out
+    # Unbind the textures, now that the frame is filtered
+    glBindTexture(GL_TEXTURE_2D, 0)
+    glUseProgram(0)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+    # Restore previous viewport so we don't affect the window/framebuffer draw
+    try:
+      glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3])
+    except Exception:
+      # If retrieving/restoring the previous viewport failed for any reason,
+      # silently continue so we don't break the pipeline.
+      pass
+
+    # return the GL tex ID of the filtered output
+    return self.tex_out
 
 
   #Read back the output of the image for debugging to the CPU, should be computed to the same integers as the previous CPU based renderer
@@ -252,9 +310,8 @@ class GasusianBlurRenderer:
     buf = glReadPixels(0,0,self.w,self.h, GL_RGB, GL_UNSIGNED_BYTE)
     glBindFramebuffer(GL_FRAMEBUFFER,0)
 
-    img = np.frombuffer(buf, dtype=np.uint8).reshape((self.hj,self.w,3))
-    #direction flip for coordinates to match CPU, cause openGL does bottom to top
-    img = np.flipud(img).copy()
+    img = np.frombuffer(buf, dtype=np.uint8).reshape((self.h,self.w,3))
+
     return img
 
 
@@ -266,7 +323,7 @@ class GasusianBlurRenderer:
     glDeleteTextures([self.tex_in, self.tex_temp, self.tex_out])
 
     #Framebuffers and vertex array object
-    glDeleteFramebuffers(2, [self.fbo_temp, fbo_out])
+    glDeleteFramebuffers(2, [self.fbo_temp, self.fbo_out])
     glDeleteVertexArrays(1, [self.vao])
 
 

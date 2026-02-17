@@ -3,25 +3,29 @@ no-eyetracking-render-loop_improved.py
 
 Goal:
   Continuous click-through overlay that renders a blurred version of the desktop
-  WITHOUT capturing itself (no feedback / "telephone game").
+  Utilises the dxgi_capture.py implementation for high performance capture (uses DXcam import)
+  Applies a gaussian blur with given kernel for each colour channel - Causes blur effect
 
-Strategy (high level):
-  1) Create an always-on-top GLFW window that is:
-     - borderless
-     - transparent framebuffer capable
-     - click-through via Win32 extended styles
-  2) Tell Windows: "exclude this window from capture" using
+Implementation:
+  1)Create an always-on-top GLFW window that is:
+        borderless
+        transparent framebuffer capable
+        click-through via Win32 extended styles
+  2)Exclude the overlay itself from capture
      SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).
      Correctness claim:
        - If the capture path honors the affinity flag, the captured frames
          will not include our overlay => no feedback loop.
-  3) In the render loop:
-       capture_desktop_excluding_hwnd(hwnd) -> blur_renderer.process(frame) -> draw fullscreen.
+         Per DXcam implementation using desktop duplication API from Windows, this flag should be respected
+  3)render loop:
+       capture_desktop_excluding_hwnd() -> blur_renderer.process(frame) -> draw overlay.
      Correctness claim:
        - We apply the filter exactly once per fresh captured frame.
-       - We do not recursively filter our own output if (2) works.
 """
 
+#---------------------
+#Imports
+#---------------------
 import time
 from pathlib import Path
 import ctypes
@@ -35,28 +39,22 @@ from render_blur import GasusianBlurRenderer
 
 
 # -----------------------------
-# Win32 helpers (click-through + exclude-from-capture)
+# Win32 helpers window styles. Specify transparency for clicks, keep above other windows etc.
 # -----------------------------
-
 user32 = ctypes.windll.user32
-
 GWL_EXSTYLE = -20
 GWL_STYLE   = -16
-
-# Extended window styles
+#window styles
 WS_EX_LAYERED      = 0x00080000
-WS_EX_TRANSPARENT  = 0x00000020  # makes window "hit-test transparent" => click-through
-WS_EX_TOOLWINDOW   = 0x00000080  # hide from Alt-Tab (optional, but common for overlays)
+WS_EX_TRANSPARENT  = 0x00000020  #"hit-test transparent" => click-through
+WS_EX_TOOLWINDOW   = 0x00000080  #do not show in alt-tab
 WS_EX_TOPMOST      = 0x00000008  # keep above normal windows
-
-# Normal window styles
+#Normal window styles
 WS_POPUP = 0x80000000
-
-# Layered attributes
+#Layered attributes
 LWA_ALPHA = 0x00000002
-
 # Display affinity:
-# WDA_EXCLUDEFROMCAPTURE = 0x11 (Win10 2004+). If unsupported, call will fail.
+#WDA_EXCLUDEFROMCAPTURE = 0x11 (from Win10 2004+)
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
 
@@ -232,7 +230,7 @@ def main():
     print("[capture] Capturing first frame to determine resolution...")
     first = None
     while first is None and not glfw.window_should_close(window):
-        first = capture_desktop_excluding_hwnd(hwnd if excluded else None, rgb=force_rgb)
+        first = capture_desktop_excluding_hwnd(rgb=force_rgb)
         glfw.poll_events()
         time.sleep(0.02)
 
@@ -290,7 +288,7 @@ def main():
             # Correctness argument:
             #   - If WDA_EXCLUDEFROMCAPTURE is honored, this frame does NOT include our overlay.
             #   - Therefore we are filtering the true desktop, not our prior filtered output.
-            frame = capture_desktop_excluding_hwnd(hwnd if excluded else None, rgb=force_rgb)
+            frame = capture_desktop_excluding_hwnd(rgb=force_rgb)
             if frame is None:
                 glfw.poll_events()
                 time.sleep(0.001)

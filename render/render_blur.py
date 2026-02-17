@@ -111,7 +111,7 @@ def _check_gl_error(tag: str) -> None:
 
 #Gaussian blur
 #----------------------
-class GasusianBlurRenderer:
+class GaussianBlurRenderer:
   """GPU only separable gaussian blur.
         input tex (captured frame -> horizontal pass -> intermediate texture -> vertical pass -> final output texture
 

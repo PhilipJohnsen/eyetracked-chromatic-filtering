@@ -35,7 +35,8 @@ from OpenGL.GL import *
 from OpenGL.GL.shaders import compileProgram, compileShader
 
 from dxgi_capture import capture_desktop_excluding_hwnd
-from render_blur import GasusianBlurRenderer
+from render_blur import GaussianBlurRenderer
+from utility.load_settings import load_settings, unpack_settings
 
 
 # -----------------------------
@@ -72,21 +73,19 @@ def _set_clickthrough_overlay_styles(hwnd: int) -> None:
         so the user can interact with the OS "as if there was no filter active".
       * Borderless/topmost makes it behave like a full-screen overlay.
     """
-    if not hwnd:
+    if not hwnd: #if we failed to get an HWND, we can't apply styles; continue without them (non-Windows or error)
         return
 
-    # Set regular style to popup (borderless). We still let GLFW manage size.
+    #Set regular style to popup (borderless). Let GLFW manage size
     style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-    style &= ~0x00CF0000  # strip caption/border-ish bits defensively
+    style &= ~0x00CF0000  #border style as popup overlay
     style |= WS_POPUP
     user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-
     ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     ex |= (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
 
-    # Ensure the layered window is fully opaque (alpha=255).
-    # Correctness: we want the overlay visible, but still click-through.
+    #Make layered window is fully opaque (alpha=255).
     user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
 
     # Force style update (applies changes immediately).
@@ -99,24 +98,23 @@ def _attempt_exclude_from_capture(hwnd: int) -> bool:
     Attempt to exclude this overlay HWND from being captured.
 
     Correctness argument:
-      - If the capture API respects window display affinity, then subsequent
-        desktop captures will omit this overlay, preventing "telephone game"
-        feedback (blurring blurred output repeatedly).
+      - If the capture API respects window display affinity, then no feedback
+        loop will occur
 
     Limitations:
-      - Requires Windows 10 version 2004+ for WDA_EXCLUDEFROMCAPTURE semantics.
-      - Some capture methods / drivers may ignore it.
+      - Requires Windows 10 version 2004+ for WDA_EXCLUDEFROMCAPTURE flag
+      - Driver issue can stop it from working
     """
-    if not hwnd:
+    if not hwnd: #If no hwnd supplied, we can't exclude; continue without it (non-Windows or error)
         return False
-    ok = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
+    ok = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) #Attempt to set flag
     return bool(ok)
+
 
 
 # -----------------------------
 # OpenGL helpers
 # -----------------------------
-
 def _create_display_shader() -> int:
     """Minimal fullscreen triangle shader that displays a sampler2D."""
     vert = r"""
@@ -147,6 +145,7 @@ def _create_display_shader() -> int:
     )
 
 
+#Used for debugging capture issues, verify format/strides/contiguity of captured frames.
 def _check_gl_error(tag: str) -> None:
     """Prints any GL errors and clears the error flag."""
     err = glGetError()
@@ -156,7 +155,7 @@ def _check_gl_error(tag: str) -> None:
         print(f"[gl] error {tag}: 0x{err:04x}")
         err = glGetError()
 
-
+#Used for debugging capture issues, ensure we are getting expected frame formats from the capture API.
 def _log_frame_info_once(frame: np.ndarray, label: str) -> None:
     if frame is None:
         print(f"[capture] {label}: None")
@@ -168,86 +167,77 @@ def _log_frame_info_once(frame: np.ndarray, label: str) -> None:
 
 
 # -----------------------------
-# Main loop
+#Main render-loop
 # -----------------------------
-
 def main():
-    # Settings (keep your existing defaults; tune as needed)
-    target_fps = 60
-    force_rgb = False
-    capture_format = "rgb"
-    debug_gl_finish = True
-    gl_finish_interval = 60
-    overlay_size = (2560, 1440)
-    overlay_pos = (0, 0)
-    radius_rgb = (0, 2, 6)
-    sigma_rgb  = (0.001, 1.0, 3.0)
+    #Settings from utility/settings.txt
+    settings = load_settings("settings.txt")
+    (target_fps, force_rgb, capture_format, 
+     debug_gl_finish, gl_finish_interval, 
+     overlay_size, overlay_pos, radius_rgb, sigma_rgb, shader_path) = unpack_settings(settings)
+    
+    #Blur shader path (relative to this script, from settings)
+    blur_glsl_path = Path(__file__).parent / shader_path
 
-    blur_glsl_path = Path(__file__).parent / "shader" / "blur.glsl"
-
+    #If glfw cant start, runtimeerror; we can't render without a window.
     if not glfw.init():
         raise RuntimeError("Failed to initialize GLFW")
 
-    # GLFW hints:
-    # Correctness argument:
-    #   - DECORATED false => no border/title (overlay feel)
-    #   - FLOATING true => always-on-top (GLFW side; we also set WS_EX_TOPMOST)
-    #   - TRANSPARENT_FRAMEBUFFER true => allows OS composition if needed
-    glfw.window_hint(glfw.DECORATED, glfw.FALSE)
-    glfw.window_hint(glfw.FLOATING, glfw.TRUE)
-    glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)
-    glfw.window_hint(glfw.FOCUSED, glfw.FALSE)  # try not to steal focus
-    glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)
+    #GLFW specifics:
+    glfw.window_hint(glfw.DECORATED, glfw.FALSE) #borderless
+    glfw.window_hint(glfw.FLOATING, glfw.TRUE) #always on top
+    glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE) #allow alpha in framebuffer for proper compositing (even if we draw fully opaque, this is needed for correct blending with desktop)
+    glfw.window_hint(glfw.FOCUSED, glfw.FALSE) #Dont steal focus from other windows, ensures no performance degradation on other windows, clickthrough should handle this perfectly
+    glfw.window_hint(glfw.RESIZABLE, glfw.TRUE) #Allow resizing in case the user wants to tweak this
 
-    # Start with a small overlay so we can verify capture exclusion behavior.
+    #Create window context
     window = glfw.create_window(overlay_size[0], overlay_size[1], "Chromatic Filtering Overlay (no eyetracking)", None, None)
     if not window:
         glfw.terminate()
         raise RuntimeError("Failed to create GLFW window")
-
     glfw.make_context_current(window)
-    glfw.swap_interval(0)  # uncapped; we do our own pacing
+    glfw.swap_interval(0)  #we select the capture pacing via settings, thus disable vsync 
 
-    # Obtain HWND
+    #Get HWND for the window to exclude
     try:
         hwnd = int(glfw.get_win32_window(window))
     except Exception:
         hwnd = 0
 
-    # Apply overlay styles (click-through + topmost + borderless)
+    #Select overlay styles for the window using win32 API calls via ctypes.
     _set_clickthrough_overlay_styles(hwnd)
 
-    # Attempt to exclude from capture (the key anti-feedback mechanism)
+    #Exclude overlay from capture (the anti-feedback mechanism)
     excluded = _attempt_exclude_from_capture(hwnd)
     print(f"[overlay] SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) success: {excluded}")
-
     if not excluded:
         print("[overlay] WARNING: Failed to exclude from capture. This may cause feedback loops (blurred blur).")
 
-    # Capture the first frame to determine resolution.
-    # Correctness argument:
-    #   - We want the overlay to match the capture resolution exactly to avoid scaling artifacts.
+    #Capture the first frame to determine settings like resolution and format for the blur renderer.
     print("[capture] Capturing first frame to determine resolution...")
     first = None
-    while first is None and not glfw.window_should_close(window):
+    while first is None and not glfw.window_should_close(window): #When we get frame number 1, we know the capture is working and can continue
         first = capture_desktop_excluding_hwnd(rgb=force_rgb)
         glfw.poll_events()
-        time.sleep(0.02)
+        time.sleep(0.02) #Brief sleep to avoid looping too much while waiting
 
-    if first is None:
+    if first is None: #Failsafe: if we exit the loop without getting a frame, quit gracefully.
         print("[capture] No frame received; quitting.")
         glfw.destroy_window(window)
         glfw.terminate()
         return
 
+    #Get the frame format for debug
     _log_frame_info_once(first, "first frame")
 
+    #We need a 3channel RGB/BGR or 4channel RGBA/BGRA format for the inputtex
     if first.ndim != 3 or first.shape[2] not in (3, 4):
         print(f"[capture] Unexpected frame format: {first.shape}")
         glfw.destroy_window(window)
         glfw.terminate()
         return
 
+    #Dont use alpha channels, just RGB or BGR. Avoiding alpha uses less performance
     if capture_format == "bgr":
         input_format = GL_BGRA if first.shape[2] == 4 else GL_BGR
     else:
@@ -257,44 +247,42 @@ def main():
     cap_h, cap_w = first.shape[:2]
     print(f"[capture] Resolution: {cap_w}x{cap_h}")
 
-    # Keep overlay small and pinned top-left so we can observe capture exclusion.
+    #Set window size and pos
     glfw.set_window_size(window, overlay_size[0], overlay_size[1])
     glfw.set_window_pos(window, overlay_pos[0], overlay_pos[1])
 
-    # Initialize blur renderer for capture resolution
-    blur_renderer = GasusianBlurRenderer(cap_w, cap_h, str(blur_glsl_path), input_format=input_format)
+    #Get the blur ready
+    blur_renderer = GaussianBlurRenderer(cap_w, cap_h, str(blur_glsl_path), input_format=input_format)
     blur_renderer.set_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
 
-    # Display program + VAO
+    #Get the shader ready and set up the VAO for the fullscreen triangle. Simplest passthru shader possible
     display_prog = _create_display_shader()
     vao = glGenVertexArrays(1)
     glBindVertexArray(vao)
     glBindVertexArray(0)
     tex_loc = glGetUniformLocation(display_prog, "uTexture")
 
-    # Basic GL state
+    #No need for z buffering, the display is 2d and doesnt need depth test
     glDisable(GL_DEPTH_TEST)
 
-    print("Press Q in the overlay window to quit (or close it).")
-
+    #Count FPS for performance
     frames = 0
     last_fps_t = time.perf_counter()
 
+    #Render loop, while the overlay window is open
     try:
         while not glfw.window_should_close(window):
             t0 = time.perf_counter()
 
-            # 1) Capture a fresh desktop frame.
-            # Correctness argument:
-            #   - If WDA_EXCLUDEFROMCAPTURE is honored, this frame does NOT include our overlay.
-            #   - Therefore we are filtering the true desktop, not our prior filtered output.
+            # 1)Capture a frame with dxgi_capture.py implementation
             frame = capture_desktop_excluding_hwnd(rgb=force_rgb)
-            if frame is None:
+            if frame is None: #Wait for frame if not available yet
                 glfw.poll_events()
                 time.sleep(0.001)
                 continue
 
-            if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+            #Check format of captured frame
+            if frame.ndim != 3 or frame.shape[2] != 3:
                 print(f"[capture] Unexpected frame format: {frame.shape}")
                 glfw.poll_events()
                 time.sleep(0.001)
@@ -303,51 +291,37 @@ def main():
             if frame.shape[2] == 4 and input_format not in (GL_BGRA, GL_RGBA):
                 print("[capture] WARNING: Got 4-channel frame, but input_format is not GL_BGRA/GL_RGBA")
 
-            if not frame.flags["C_CONTIGUOUS"]:
-                frame = np.ascontiguousarray(frame)
+            if not frame.flags["C_CONTIGUOUS"]: #need contiguous array for glTexSubImage2D upload
+                frame = np.ascontiguousarray(frame) 
 
-            # (Optional) sanity stats you can enable during debugging:
-            # m, mx = float(frame.mean()), int(frame.max())
-            # print("[capture] mean/max:", m, mx)
-
-            # 2) Process on GPU (separable blur passes).
-            # Correctness argument:
-            #   - This applies the filter exactly once per new frame.
+            # 2)Process on GPU (separable blur passes).
+            #Applies the blur shader to captured frame, returns outputted tex handle
             out_tex = blur_renderer.process(frame)
-            _check_gl_error("after blur process")
+            _check_gl_error("after blur process") #posts error if the blur shader fails in OpenGL
 
-            # 3) Present to overlay.
+            # 3)Display on overlay
             fb_w, fb_h = glfw.get_framebuffer_size(window)
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
             glViewport(0, 0, fb_w, fb_h)
 
-            glClearColor(0.0, 0.0, 0.0, 0.0)  # alpha 0 ok; we draw full-screen anyway
+            #Clear to transparent black 
+            glClearColor(0.0, 0.0, 0.0, 0.0)
             glClear(GL_COLOR_BUFFER_BIT)
 
+            #Draw to the screen
             glUseProgram(display_prog)
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, out_tex)
             glUniform1i(tex_loc, 0)
-
             glBindVertexArray(vao)
             glDrawArrays(GL_TRIANGLES, 0, 3)
             glBindVertexArray(0)
+            _check_gl_error("after draw") #posts error if the display shader fails in OpenGL
 
-            _check_gl_error("after draw")
+            glfw.swap_buffers(window) #GPU syncs here, so rendered frame is presented after the call completes
+            glfw.poll_events() #Poll for new events like window close or keypresses
 
-            glfw.swap_buffers(window)
-            glfw.poll_events()
-
-            if debug_gl_finish and frames % gl_finish_interval == 0:
-                glFinish()
-                _check_gl_error("after glFinish")
-
-            # Avoid glFinish(); it hard-stalls the GPU every frame.
-            # Correctness argument:
-            #   - Swap buffers + normal GL pipeline is sufficient for continuous rendering.
-            #   - If you need explicit sync later, use fences; but default is faster.
-
-            # FPS telemetry
+            #FPS telemetry
             frames += 1
             now = time.perf_counter()
             if now - last_fps_t >= 1.0:
@@ -355,17 +329,14 @@ def main():
                 frames = 0
                 last_fps_t = now
 
-            # Quit on Q
-            if glfw.get_key(window, glfw.KEY_Q) == glfw.PRESS:
-                print("Quitting (Q key).")
-                break
-
-            # Frame pacing
+            #Frame pacing, looking for target_fps from settings, and sleeps if rendering goes too fast
+            #Avoids using 100% GPU on more FPS when it is not necessary
             dt = time.perf_counter() - t0
             target_dt = 1.0 / max(1, int(target_fps))
             if dt < target_dt:
                 time.sleep(target_dt - dt)
 
+    #Cleanup resources on exit
     finally:
         blur_renderer.cleanup()
         glDeleteProgram(display_prog)

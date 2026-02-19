@@ -1,0 +1,10 @@
+opencv-python
+numpy
+dxcam
+time
+pathlib
+ctypes
+glfw
+OpenGL
+typing
+os

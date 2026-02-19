@@ -111,6 +111,30 @@ def _attempt_exclude_from_capture(hwnd: int) -> bool:
     return bool(ok)
 
 
+def _enable_dpi_awareness() -> None:
+    """
+    Enable Per-Monitor v2 DPI awareness for this process.
+    
+    This makes both the GLFW window and DXcam capture operate at physical pixel resolution,
+    avoiding the DPI scaling mismatch issue where DXcam captures at physical resolution
+    but GLFW window operates at logical resolution (scaled).
+    
+    Correctness argument:
+      - DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (-4) ensures that window messages
+        and rendering operate at the native monitor DPI, not the scaled logical DPI.
+      - This synchronizes with DXcam's physical pixel capture and prevents upscaling blur artifacts.
+    
+    Limitations:
+      - Requires Windows 10 Build 1607+ for DPI awareness context API
+      - If SetProcessDpiAwarenessContext fails, continues silently (older Windows versions)
+    """
+    try:
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+    except (AttributeError, OSError):
+        # Function not available on older Windows versions or failed; continue without it
+        pass
+
 
 # -----------------------------
 # OpenGL helpers
@@ -178,6 +202,9 @@ def main():
     
     #Blur shader path (relative to this script, from settings)
     blur_glsl_path = Path(__file__).parent / shader_path
+
+    # Enable DPI awareness so DXcam capture and GLFW window both use physical pixels
+    _enable_dpi_awareness()
 
     #If glfw cant start, runtimeerror; we can't render without a window.
     if not glfw.init():

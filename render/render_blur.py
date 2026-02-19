@@ -150,7 +150,7 @@ class GaussianBlurRenderer:
     #Cache uniform for programs
     self._cache_uniforms()
 
-    #load parameters CURRENTLY STATIC IMPLEMENT SETTINGS LOAD IF NEEDED
+    #initial parameters, they get uploaded down the stream
     self.set_params(radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0))
 
     #fixed texel size
@@ -194,7 +194,7 @@ class GaussianBlurRenderer:
     glUseProgram(0)
 
 
-  #Load parameters from /init/settings.txt
+  #Load parameters from /utility/settings.txt
   def set_params(self, radius_rgb=(0,2,6), sigma_rgb=(0.001,1.0,3.0)):
     rR, rG, rB = map(int, radius_rgb)
     sR, sG, sB = map(float, sigma_rgb)

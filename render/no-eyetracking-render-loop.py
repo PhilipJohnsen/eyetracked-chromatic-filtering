@@ -23,12 +23,45 @@ Implementation:
        - We apply the filter exactly once per fresh captured frame.
 """
 
+# -----------------------------
+# DPI Awareness - Must execute BEFORE any imports that query screen dimensions
+# -----------------------------
+import ctypes
+
+def _set_dpi_awareness():
+    """Set DPI awareness using multiple fallback methods for compatibility."""
+    #Try shcore.SetProcessDpiAwareness (Windows 8.1+)
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  #PROCESS_PER_MONITOR_DPI_AWARE
+        return True
+    except (AttributeError, OSError):
+        pass
+    
+    #Try user32.SetProcessDpiAwarenessContext (Windows 10 1607+)
+    try:
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(-4):  #DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            return True
+    except (AttributeError, OSError):
+        pass
+    
+    #Try user32.SetProcessDPIAware (Windows Vista+)
+    try:
+        if ctypes.windll.user32.SetProcessDPIAware():
+            return True
+    except (AttributeError, OSError):
+        pass
+    
+    return False
+
+#Execute DPI awareness before any screen queries
+if not _set_dpi_awareness():
+    print("[WARNING] Failed to set DPI awareness - capture may use logical pixels instead of physical")
+
 #---------------------
 #Imports
 #---------------------
 import time
 from pathlib import Path
-import ctypes
 import numpy as np
 import glfw
 from OpenGL.GL import *
@@ -73,67 +106,52 @@ def _set_clickthrough_overlay_styles(hwnd: int) -> None:
         so the user can interact with the OS "as if there was no filter active".
       * Borderless/topmost makes it behave like a full-screen overlay.
     """
-    if not hwnd: #if we failed to get an HWND, we can't apply styles; continue without them (non-Windows or error)
+    if not hwnd:
         return
 
-    #Set regular style to popup (borderless). Let GLFW manage size
+    #Set popup style (borderless)
     style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-    style &= ~0x00CF0000  #border style as popup overlay
+    style &= ~0x00CF0000
     style |= WS_POPUP
     user32.SetWindowLongW(hwnd, GWL_STYLE, style)
     ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
     ex |= (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
 
-    #Make layered window is fully opaque (alpha=255).
+    #Set layered window to fully opaque
     user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
 
-    # Force style update (applies changes immediately).
+    #Force style update
     user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0,
-                        0x0001 | 0x0002 | 0x0020 | 0x0040)  # NOSIZE|NOMOVE|FRAMECHANGED|NOACTIVATE
+                        0x0001 | 0x0002 | 0x0020 | 0x0040)  #NOSIZE|NOMOVE|FRAMECHANGED|NOACTIVATE
 
 
 def _attempt_exclude_from_capture(hwnd: int) -> bool:
     """
-    Attempt to exclude this overlay HWND from being captured.
+    Exclude overlay window from desktop capture.
 
-    Correctness argument:
+    Correctness claim:
       - If the capture API respects window display affinity, then no feedback
         loop will occur
 
     Limitations:
       - Requires Windows 10 version 2004+ for WDA_EXCLUDEFROMCAPTURE flag
-      - Driver issue can stop it from working
+      - Driver issues can prevent this from working
     """
-    if not hwnd: #If no hwnd supplied, we can't exclude; continue without it (non-Windows or error)
+    if not hwnd:
         return False
-    ok = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE) #Attempt to set flag
+    ok = user32.SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)
     return bool(ok)
 
 
-def _enable_dpi_awareness() -> None:
-    """
-    Enable Per-Monitor v2 DPI awareness for this process.
-    
-    This makes both the GLFW window and DXcam capture operate at physical pixel resolution,
-    avoiding the DPI scaling mismatch issue where DXcam captures at physical resolution
-    but GLFW window operates at logical resolution (scaled).
-    
-    Correctness argument:
-      - DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (-4) ensures that window messages
-        and rendering operate at the native monitor DPI, not the scaled logical DPI.
-      - This synchronizes with DXcam's physical pixel capture and prevents upscaling blur artifacts.
-    
-    Limitations:
-      - Requires Windows 10 Build 1607+ for DPI awareness context API
-      - If SetProcessDpiAwarenessContext fails, continues silently (older Windows versions)
-    """
+def _get_physical_monitor_resolution() -> tuple:
+    """Get primary monitor resolution in physical pixels."""
     try:
-        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
-        ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
-    except (AttributeError, OSError):
-        # Function not available on older Windows versions or failed; continue without it
-        pass
+        width = ctypes.windll.user32.GetSystemMetrics(0)   #SM_CXSCREEN
+        height = ctypes.windll.user32.GetSystemMetrics(1)  #SM_CYSCREEN
+        return (width, height)
+    except Exception:
+        return (None, None)
 
 
 # -----------------------------
@@ -171,7 +189,7 @@ def _create_display_shader() -> int:
 
 #Used for debugging capture issues, verify format/strides/contiguity of captured frames.
 def _check_gl_error(tag: str) -> None:
-    """Prints any GL errors and clears the error flag."""
+    """Print any GL errors and clear the error flag."""
     err = glGetError()
     if err == GL_NO_ERROR:
         return
@@ -179,23 +197,14 @@ def _check_gl_error(tag: str) -> None:
         print(f"[gl] error {tag}: 0x{err:04x}")
         err = glGetError()
 
-#Used for debugging capture issues, ensure we are getting expected frame formats from the capture API.
-def _log_frame_info_once(frame: np.ndarray, label: str) -> None:
-    if frame is None:
-        print(f"[capture] {label}: None")
-        return
-    print(
-        f"[capture] {label}: shape={frame.shape}, dtype={frame.dtype}, "
-        f"contiguous={frame.flags['C_CONTIGUOUS']}, strides={frame.strides}"
-    )
-
 
 # -----------------------------
 #Main render-loop
 # -----------------------------
 def main():
-    #Settings from utility/settings.txt
-    settings = load_settings("settings.txt")
+    #Settings from utility/settings.txt (relative to this script)
+    settings_path = Path(__file__).parent / "utility" / "settings.txt"
+    settings = load_settings(str(settings_path))
     (target_fps, force_rgb, capture_format, 
      debug_gl_finish, gl_finish_interval, 
      overlay_size, overlay_pos, radius_rgb, sigma_rgb, shader_path) = unpack_settings(settings)
@@ -203,10 +212,10 @@ def main():
     #Blur shader path (relative to this script, from settings)
     blur_glsl_path = Path(__file__).parent / shader_path
 
-    # Enable DPI awareness so DXcam capture and GLFW window both use physical pixels
-    _enable_dpi_awareness()
+    #Query physical monitor resolution for validation
+    phys_w, phys_h = _get_physical_monitor_resolution()
 
-    #If glfw cant start, runtimeerror; we can't render without a window.
+    #Initialize GLFW
     if not glfw.init():
         raise RuntimeError("Failed to initialize GLFW")
 
@@ -231,10 +240,10 @@ def main():
     except Exception:
         hwnd = 0
 
-    #Select overlay styles for the window using win32 API calls via ctypes.
+    #Apply clickthrough overlay styles
     _set_clickthrough_overlay_styles(hwnd)
 
-    #Exclude overlay from capture (the anti-feedback mechanism)
+    #Exclude overlay from capture to prevent feedback loop
     excluded = _attempt_exclude_from_capture(hwnd)
     print(f"[overlay] SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) success: {excluded}")
     if not excluded:
@@ -254,31 +263,34 @@ def main():
         glfw.terminate()
         return
 
-    #Get the frame format for debug
-    _log_frame_info_once(first, "first frame")
-
-    #We need a 3channel RGB/BGR or 4channel RGBA/BGRA format for the inputtex
+    #Validate frame format
     if first.ndim != 3 or first.shape[2] not in (3, 4):
         print(f"[capture] Unexpected frame format: {first.shape}")
         glfw.destroy_window(window)
         glfw.terminate()
         return
 
-    #Dont use alpha channels, just RGB or BGR. Avoiding alpha uses less performance
+    #Select GL format based on channel count
     if capture_format == "bgr":
         input_format = GL_BGRA if first.shape[2] == 4 else GL_BGR
     else:
         input_format = GL_RGBA if first.shape[2] == 4 else GL_RGB
-    print(f"[capture] Using input_format=0x{int(input_format):x}")
 
     cap_h, cap_w = first.shape[:2]
     print(f"[capture] Resolution: {cap_w}x{cap_h}")
+    
+    #Validate capture resolution matches physical monitor
+    if phys_w is not None and phys_h is not None:
+        if cap_w != phys_w or cap_h != phys_h:
+            scale_x = phys_w / cap_w if cap_w > 0 else 1.0
+            scale_y = phys_h / cap_h if cap_h > 0 else 1.0
+            print(f"[WARNING] Capture mismatch: {cap_w}x{cap_h} != monitor {phys_w}x{phys_h} (scale: {scale_x:.2f}x)")
 
     #Set window size and pos
     glfw.set_window_size(window, overlay_size[0], overlay_size[1])
     glfw.set_window_pos(window, overlay_pos[0], overlay_pos[1])
 
-    #Get the blur ready
+    #Initialize blur renderer
     blur_renderer = GaussianBlurRenderer(cap_w, cap_h, str(blur_glsl_path), input_format=input_format)
     blur_renderer.set_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
 
@@ -292,11 +304,11 @@ def main():
     #No need for z buffering, the display is 2d and doesnt need depth test
     glDisable(GL_DEPTH_TEST)
 
-    #Count FPS for performance
+    #FPS counter
     frames = 0
     last_fps_t = time.perf_counter()
 
-    #Render loop, while the overlay window is open
+    #Render loop
     try:
         while not glfw.window_should_close(window):
             t0 = time.perf_counter()
@@ -308,7 +320,7 @@ def main():
                 time.sleep(0.001)
                 continue
 
-            #Check format of captured frame
+            #Validate frame format
             if frame.ndim != 3 or frame.shape[2] != 3:
                 print(f"[capture] Unexpected frame format: {frame.shape}")
                 glfw.poll_events()

@@ -22,9 +22,6 @@ import numpy as np
 import cv2
 import dxcam
 
-#Debugging flag, true while in development, will select False when deployment is ready
-DEBUG_DXCAM = True
-
 
 class DXCamCapture:
     """DXcam-based capture that returns frames for CV processing."""

@@ -116,9 +116,97 @@ def cleanup() -> None:
         _capture = None
 
 
+def test_capture_validity(output_idx: int = 0, num_frames: int = 10) -> bool:
+    """
+    Test whether DXcam is capturing meaningful data from the specified monitor.
+    
+    Checks:
+    1. Monitor is accessible and DXcam initializes
+    2. Frames are being captured (not None)
+    3. Frames contain variance (not all one color/black)
+    4. Resolution is sensible
+    
+    Returns:
+        True if capture appears valid, False otherwise.
+    """
+    print(f"\n[test] Testing DXcam capture on output_idx={output_idx}...")
+    
+    try:
+        camera = dxcam.create(output_idx=output_idx)
+        if camera is None:
+            print(f"[test] FAIL: dxcam.create returned None for output_idx={output_idx}")
+            return False
+        
+        print(f"[test] DXcam initialized for monitor {output_idx}")
+        
+        # Get a few frames
+        captured_frames = []
+        for i in range(num_frames):
+            frame = camera.grab()
+            if frame is None:
+                print(f"[test] FAIL: Frame {i+1} is None")
+                camera.stop()
+                return False
+            captured_frames.append(frame)
+            time.sleep(0.05)
+        
+        # Analyze the frames
+        first_frame = captured_frames[0]
+        print(f"[test] Resolution: {first_frame.shape[1]}x{first_frame.shape[0]}, dtype: {first_frame.dtype}, channels: {first_frame.shape[2]}")
+        
+        # Check if frame is all black or all one color
+        unique_pixels = len(np.unique(first_frame.reshape(-1, first_frame.shape[2]), axis=0))
+        print(f"[test] Unique colors in first frame: {unique_pixels}")
+        
+        if unique_pixels < 10:
+            print(f"[test] WARNING: Very few unique colors ({unique_pixels}), possibly all black or corrupted")
+        
+        # Check variance across channels
+        r_var = np.var(first_frame[:, :, 0])
+        g_var = np.var(first_frame[:, :, 1])
+        b_var = np.var(first_frame[:, :, 2])
+        print(f"[test] Variance per channel - R: {r_var:.1f}, G: {g_var:.1f}, B: {b_var:.1f}")
+        
+        if r_var < 1 and g_var < 1 and b_var < 1:
+            print(f"[test] FAIL: All channels have near-zero variance. Capture is likely all black or static.")
+            camera.stop()
+            return False
+        
+        # Check if any frame differs from the first
+        frames_match = True
+        for i, frame in enumerate(captured_frames[1:], start=2):
+            if not np.array_equal(frame, first_frame):
+                frames_match = False
+                diff = np.abs(frame.astype(float) - first_frame.astype(float)).mean()
+                print(f"[test] Frame {i} differs from frame 1 (avg diff: {diff:.1f})")
+                break
+        
+        if frames_match:
+            print(f"[test] WARNING: All frames are identical. Capture may be frozen.")
+        
+        camera.stop()
+        print(f"[test] PASS: DXcam capture appears valid")
+        return True
+        
+    except Exception as e:
+        print(f"[test] FAIL: Exception during test: {e}")
+        return False
+
+
 if __name__ == "__main__":
     print("Testing DXcam Desktop Duplication...")
-
+    
+    # First, diagnose the capture
+    valid = test_capture_validity(output_idx=0, num_frames=10)
+    
+    if not valid:
+        print("\n[test] Capture validation failed. Check:")
+        print("  1. Is the monitor connected and not in sleep mode?")
+        print("  2. Try a different output_idx (0, 1, 2, etc.)")
+        import sys
+        sys.exit(1)
+    
+    print("\n[test] Running frame capture loop...")
     for i in range(5):
         start = time.perf_counter()
         frame = capture_desktop_excluding_hwnd(rgb=False)

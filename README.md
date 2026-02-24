@@ -53,7 +53,7 @@ pip install -r render/utility/requirements.txt
 4. Configure settings in `render/utility/settings.txt`:
 The settings are configured already, and are suited for 40cm viewing distance, 6.5mm pupil size, and specifcally the 1440p monitor AG271QX. Change the settings per your needs.
 
-## PSF Calculation
+## PSF Calculation Guide
 ### Understand the point spread function
 PSF describes how light from a point source spreads across the image plane. In this project, the PSF is calculated based on the human longtitudinal chromatic abberration (LCA) function.
 
@@ -62,7 +62,7 @@ PSF describes how light from a point source spreads across the image plane. In t
 2. Set your specifics, such as focal length, pupil size, viewing distance and pixel pitch.
 3. Run the notebook, check the plots alignment and update render/utility/settings.txt, specifically the "radius_rgb" and "sigma_rgb".
 
-## Running the render loop
+## Running the Render Loop
 ### No Eyetracking mode
 To test with if you do not have eye tracking hardware at your disposal.
 ```bash

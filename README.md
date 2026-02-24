@@ -13,6 +13,7 @@ The eye tracking technology used is from Tobii, a Swedish eye tracking hardware 
 - [Setup Guide](#setup-guide)
 - [PSF Calculation Guide](#psf-calculation-guide)
 - [Running the Render Loop](#running-the-render-loop)
+- [Known bugs](#known-bugs)
 
 ## Setup Guide
 Setting up this chromatic filtering is designed to be easily accessible. I recommend setting up a virtual environment to ensure compatibility across packages.
@@ -80,7 +81,10 @@ This will:
 - **No frame captured**: Ensure DXcam can access your display
 - **Performance issues**: Reduce `target_fps` or `overlay_size`
 - **Shader errors**: Verify `shader_path` points to valid GLSL file
-- **Black screen**: Check if your windows DPI scaling is at 1.00x. If Windows upscaling is not =1.00x, the DXcam capture can throw errors resulting in a black screen.
+- **Black screen**: Attempt to use a 1px border (if display is 3000x2000, use 2999x1999). Known bug
+
+## Known Bugs
+- On certain laptop displays with windows upscaling, a 1px border is needed to render the loop correctly, otherwise it goes fully black. The cause for this is unknown.
 
 ## License
 None yet, repo is still a WIP

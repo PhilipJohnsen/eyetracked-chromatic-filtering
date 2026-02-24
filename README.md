@@ -16,7 +16,7 @@ The eye tracking technology used is from Tobii, a Swedish eye tracking hardware 
 
 ## Setup Guide
 Setting up this chromatic filtering is designed to be easily accessible. I recommend setting up a virtual environment to ensure compatibility across packages.
-###Prerequisites
+### Prerequisites
 - Python 3.10+
 - Windows 10/11
 - GPU with OpenGL support
@@ -32,7 +32,7 @@ During the initial development phase, these are the benchmarks without eye track
 - RAM: Resting usage 12.0GB, increases to 12.3GB usage                         with blur running @1440p60
 - GPU: Resting usage 34%, increases to 35% usage                               with blur running @1440p60
 
-###Installation
+### Installation
 1. Clone the repository
 ```bash
 git clone https://github.com/PhilipJohnsen/eyetracked-chromatic-filtering

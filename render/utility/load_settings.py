@@ -112,7 +112,8 @@ def unpack_settings(settings_dict):
     Returns:
         tuple: All settings in order: target_fps, force_rgb, capture_format,
                debug_gl_finish, gl_finish_interval, overlay_size, 
-               overlay_pos, radius_rgb, sigma_rgb, shader_path
+               overlay_pos, radius_rgb, sigma_rgb, shader_path,
+               foveal_radius, transition_width
     """
     # Define defaults
     defaults = {
@@ -125,7 +126,9 @@ def unpack_settings(settings_dict):
         'overlay_pos': (0, 0),
         'radius_rgb': (0, 2, 6),
         'sigma_rgb': (0.001, 1.0, 3.0),
-        'shader_path': 'shader/blur.glsl'
+        'shader_path': 'shader/blur.glsl',
+        'foveal_radius': 0.08,
+        'transition_width': 0.12
     }
     
     # Update defaults with loaded settings
@@ -150,7 +153,9 @@ def unpack_settings(settings_dict):
         defaults['overlay_pos'],
         defaults['radius_rgb'],
         defaults['sigma_rgb'],
-        defaults['shader_path']
+        defaults['shader_path'],
+        defaults['foveal_radius'],
+        defaults['transition_width']
     )
 
 

@@ -1,26 +1,30 @@
 """
-no-eyetracking-render-loop_improved.py
+eyetracking-render-loop.py
 
 Goal:
-  Continuous click-through overlay that renders a blurred version of the desktop
+  Continuous click-through overlay that renders a foveated blurred version of the desktop
+  Blur is applied only in the periphery based on gaze position
+  Currently uses mouse position as gaze proxy
   Utilises the dxgi_capture.py implementation for high performance capture (uses DXcam import)
-  Applies a gaussian blur with given kernel for each colour channel - Causes blur effect
+  Applies a gaussian blur with given kernel for each colour channel
 
 Implementation:
-  1)Create an always-on-top GLFW window that is:
+  1) Create an always-on-top GLFW window that is:
         borderless
         transparent framebuffer capable
         click-through via Win32 extended styles
-  2)Exclude the overlay itself from capture
+  2) Exclude the overlay itself from capture
      SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).
      Correctness claim:
        - If the capture path honors the affinity flag, the captured frames
          will not include our overlay => no feedback loop.
          Per DXcam implementation using desktop duplication API from Windows, this flag should be respected
-  3)render loop:
-       capture_desktop_excluding_hwnd() -> blur_renderer.process(frame) -> draw overlay.
+  3) Track gaze position (currently mouse position) and convert to normalized coordinates
+  4) Render loop:
+       capture_desktop_excluding_hwnd() -> foveated_blur_renderer.process(frame, gaze_pos) -> draw overlay.
      Correctness claim:
        - We apply the filter exactly once per fresh captured frame.
+       - Blur is only applied in peripheral regions based on distance from gaze.
 """
 
 # -----------------------------
@@ -30,21 +34,21 @@ import ctypes
 
 def _set_dpi_awareness():
     """Set DPI awareness using multiple fallback methods for compatibility."""
-    #Try shcore.SetProcessDpiAwareness (Windows 8.1+)
+    # Try shcore.SetProcessDpiAwareness (Windows 8.1+)
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  #PROCESS_PER_MONITOR_DPI_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
         return True
     except (AttributeError, OSError):
         pass
     
-    #Try user32.SetProcessDpiAwarenessContext (Windows 10 1607+)
+    # Try user32.SetProcessDpiAwarenessContext (Windows 10 1607+)
     try:
-        if ctypes.windll.user32.SetProcessDpiAwarenessContext(-4):  #DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+        if ctypes.windll.user32.SetProcessDpiAwarenessContext(-4):  # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
             return True
     except (AttributeError, OSError):
         pass
     
-    #Try user32.SetProcessDPIAware (Windows Vista+)
+    # Try user32.SetProcessDPIAware (Windows Vista+)
     try:
         if ctypes.windll.user32.SetProcessDPIAware():
             return True
@@ -53,13 +57,13 @@ def _set_dpi_awareness():
     
     return False
 
-#Execute DPI awareness before any screen queries
+# Execute DPI awareness before any screen queries
 if not _set_dpi_awareness():
     print("[WARNING] Failed to set DPI awareness - capture may use logical pixels instead of physical")
 
-#---------------------
-#Imports
-#---------------------
+# ---------------------
+# Imports
+# ---------------------
 import time
 from pathlib import Path
 import numpy as np
@@ -68,8 +72,9 @@ from OpenGL.GL import *
 from OpenGL.GL.shaders import compileProgram, compileShader
 
 from dxgi_capture import capture_desktop_excluding_hwnd
-from render_blur import GaussianBlurRenderer
+from render_foveated_blur import FoveatedBlurRenderer
 from utility.load_settings import load_settings, unpack_settings
+from init_eyetracking import initialize_eyetracker
 
 
 # -----------------------------
@@ -78,17 +83,17 @@ from utility.load_settings import load_settings, unpack_settings
 user32 = ctypes.windll.user32
 GWL_EXSTYLE = -20
 GWL_STYLE   = -16
-#window styles
+# Window styles
 WS_EX_LAYERED      = 0x00080000
-WS_EX_TRANSPARENT  = 0x00000020  #"hit-test transparent" => click-through
-WS_EX_TOOLWINDOW   = 0x00000080  #do not show in alt-tab
+WS_EX_TRANSPARENT  = 0x00000020  # "hit-test transparent" => click-through
+WS_EX_TOOLWINDOW   = 0x00000080  # do not show in alt-tab
 WS_EX_TOPMOST      = 0x00000008  # keep above normal windows
-#Normal window styles
+# Normal window styles
 WS_POPUP = 0x80000000
-#Layered attributes
+# Layered attributes
 LWA_ALPHA = 0x00000002
 # Display affinity:
-#WDA_EXCLUDEFROMCAPTURE = 0x11 (from Win10 2004+)
+# WDA_EXCLUDEFROMCAPTURE = 0x11 (from Win10 2004+)
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
 
@@ -109,7 +114,7 @@ def _set_clickthrough_overlay_styles(hwnd: int) -> None:
     if not hwnd:
         return
 
-    #Set popup style (borderless)
+    # Set popup style (borderless)
     style = user32.GetWindowLongW(hwnd, GWL_STYLE)
     style &= ~0x00CF0000
     style |= WS_POPUP
@@ -118,12 +123,12 @@ def _set_clickthrough_overlay_styles(hwnd: int) -> None:
     ex |= (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
 
-    #Set layered window to fully opaque
+    # Set layered window to fully opaque
     user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
 
-    #Force style update
+    # Force style update
     user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0,
-                        0x0001 | 0x0002 | 0x0020 | 0x0040)  #NOSIZE|NOMOVE|FRAMECHANGED|NOACTIVATE
+                        0x0001 | 0x0002 | 0x0020 | 0x0040)  # NOSIZE|NOMOVE|FRAMECHANGED|NOACTIVATE
 
 
 def _attempt_exclude_from_capture(hwnd: int) -> bool:
@@ -147,8 +152,8 @@ def _attempt_exclude_from_capture(hwnd: int) -> bool:
 def _get_physical_monitor_resolution() -> tuple:
     """Get primary monitor resolution in physical pixels."""
     try:
-        width = ctypes.windll.user32.GetSystemMetrics(0)   #SM_CXSCREEN
-        height = ctypes.windll.user32.GetSystemMetrics(1)  #SM_CYSCREEN
+        width = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
+        height = ctypes.windll.user32.GetSystemMetrics(1)  # SM_CYSCREEN
         return (width, height)
     except Exception:
         return (None, None)
@@ -187,7 +192,7 @@ def _create_display_shader() -> int:
     )
 
 
-#Used for debugging capture issues, verify format/strides/contiguity of captured frames.
+# Used for debugging capture issues, verify format/strides/contiguity of captured frames.
 def _check_gl_error(tag: str) -> None:
     """Print any GL errors and clear the error flag."""
     err = glGetError()
@@ -198,8 +203,35 @@ def _check_gl_error(tag: str) -> None:
         err = glGetError()
 
 
+def _get_normalized_gaze_position(window, win_width: int, win_height: int) -> tuple:
+    """Get gaze position in normalized coordinates [0,1] x [0,1].
+    
+    Currently uses mouse position as proxy for gaze.
+    (0, 0) = top-left corner
+    (1, 1) = bottom-right corner
+    
+    Args:
+        window: GLFW window handle
+        win_width: Window width in pixels
+        win_height: Window height in pixels
+    
+    Returns:
+        (x, y) tuple in normalized coordinates [0,1]
+    """
+    #Get mouse pos
+    mouse_x, mouse_y = glfw.get_cursor_pos(window)
+    
+    #Clamp to window
+    mouse_x = max(0, min(mouse_x, win_width))
+    mouse_y = max(0, min(mouse_y, win_height))
+    #Normalize to [0, 1]
+    norm_x = mouse_x / max(1, win_width)
+    norm_y = mouse_y / max(1, win_height)
+    
+    return (norm_x, norm_y)
+
 # -----------------------------
-#Main render-loop
+# Main render-loop
 # -----------------------------
 def main():
     #Settings from utility/settings.txt (relative to this script)
@@ -207,71 +239,79 @@ def main():
     settings = load_settings(str(settings_path))
     (target_fps, force_rgb, capture_format, 
      debug_gl_finish, gl_finish_interval, 
-     overlay_size, overlay_pos, radius_rgb, sigma_rgb, 
-     shader_path, foveal_radius, transition_width) = unpack_settings(settings)
+     overlay_size, overlay_pos, radius_rgb, sigma_rgb, shader_path,
+     foveal_radius, transition_width) = unpack_settings(settings)
     
     #Blur shader path (relative to this script, from settings)
     blur_glsl_path = Path(__file__).parent / shader_path
+    
+    #Foveated compositing shader path
+    composite_glsl_path = Path(__file__).parent / "shader" / "foveal_composite.glsl"
 
     #Query physical monitor resolution for validation
     phys_w, phys_h = _get_physical_monitor_resolution()
 
-    #Initialize GLFW
+    # Initialize GLFW
     if not glfw.init():
         raise RuntimeError("Failed to initialize GLFW")
 
-    #GLFW specifics:
-    glfw.window_hint(glfw.DECORATED, glfw.FALSE) #borderless
-    glfw.window_hint(glfw.FLOATING, glfw.TRUE) #always on top
-    glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE) #allow alpha in framebuffer for proper compositing (even if we draw fully opaque, this is needed for correct blending with desktop)
-    glfw.window_hint(glfw.FOCUSED, glfw.FALSE) #Dont steal focus from other windows, ensures no performance degradation on other windows, clickthrough should handle this perfectly
-    glfw.window_hint(glfw.RESIZABLE, glfw.TRUE) #Allow resizing in case the user wants to tweak this
+    # GLFW specifics:
+    glfw.window_hint(glfw.DECORATED, glfw.FALSE)  # borderless
+    glfw.window_hint(glfw.FLOATING, glfw.TRUE)  # always on top
+    glfw.window_hint(glfw.TRANSPARENT_FRAMEBUFFER, glfw.TRUE)  # allow alpha in framebuffer for proper compositing
+    glfw.window_hint(glfw.FOCUSED, glfw.FALSE)  # Don't steal focus from other windows
+    glfw.window_hint(glfw.RESIZABLE, glfw.TRUE)  # Allow resizing in case the user wants to tweak this
 
-    #Create window context
-    window = glfw.create_window(overlay_size[0], overlay_size[1], "Chromatic Filtering Overlay (no eyetracking)", None, None)
+    # Create window context
+    window = glfw.create_window(overlay_size[0], overlay_size[1], 
+                                 "Chromatic Filtering Overlay (eyetracking)", None, None)
     if not window:
         glfw.terminate()
         raise RuntimeError("Failed to create GLFW window")
     glfw.make_context_current(window)
-    glfw.swap_interval(0)  #we select the capture pacing via settings, thus disable vsync 
+    glfw.swap_interval(0)  # we select the capture pacing via settings, thus disable vsync 
 
-    #Get HWND for the window to exclude
+    # Get HWND for the window exclude flag
     try:
         hwnd = int(glfw.get_win32_window(window))
     except Exception:
         hwnd = 0
 
-    #Apply clickthrough overlay styles
+    # Apply clickthrough overlay styles
     _set_clickthrough_overlay_styles(hwnd)
 
-    #Exclude overlay from capture to prevent feedback loop
+    # Exclude overlay from capture to prevent feedback loop
     excluded = _attempt_exclude_from_capture(hwnd)
     print(f"[overlay] SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) success: {excluded}")
     if not excluded:
         print("[overlay] WARNING: Failed to exclude from capture. This may cause feedback loops (blurred blur).")
 
-    #Capture the first frame to determine settings like resolution and format for the blur renderer.
+    # Initialize eye tracking (with mouse fallback)
+    tracker = initialize_eyetracker(window, prefer_tobii=True)
+    tracker.calibrate()
+
+    # Capture the first frame to determine settings like resolution and format for the blur renderer.
     print("[capture] Capturing first frame to determine resolution...")
     first = None
-    while first is None and not glfw.window_should_close(window): #When we get frame number 1, we know the capture is working and can continue
+    while first is None and not glfw.window_should_close(window):  # When we get frame number 1, we know the capture is working and can continue
         first = capture_desktop_excluding_hwnd(rgb=force_rgb)
         glfw.poll_events()
-        time.sleep(0.02) #Brief sleep to avoid looping too much while waiting
+        time.sleep(0.02)  # Brief sleep to avoid looping too much while waiting
 
-    if first is None: #Failsafe: if we exit the loop without getting a frame, quit gracefully.
+    if first is None:  # Failsafe: if we exit the loop without getting a frame, quit gracefully.
         print("[capture] No frame received; quitting.")
         glfw.destroy_window(window)
         glfw.terminate()
         return
 
-    #Validate frame format
+    # Validate frame format
     if first.ndim != 3 or first.shape[2] not in (3, 4):
         print(f"[capture] Unexpected frame format: {first.shape}")
         glfw.destroy_window(window)
         glfw.terminate()
         return
 
-    #Select GL format based on channel count
+    # Select GL format based on channel count
     if capture_format == "bgr":
         input_format = GL_BGRA if first.shape[2] == 4 else GL_BGR
     else:
@@ -280,49 +320,57 @@ def main():
     cap_h, cap_w = first.shape[:2]
     print(f"[capture] Resolution: {cap_w}x{cap_h}")
     
-    #Validate capture resolution matches physical monitor
+    # Validate capture resolution matches physical monitor
     if phys_w is not None and phys_h is not None:
         if cap_w != phys_w or cap_h != phys_h:
             scale_x = phys_w / cap_w if cap_w > 0 else 1.0
             scale_y = phys_h / cap_h if cap_h > 0 else 1.0
             print(f"[WARNING] Capture mismatch: {cap_w}x{cap_h} != monitor {phys_w}x{phys_h} (scale: {scale_x:.2f}x)")
 
-    #Set window size and pos
+    # Set window size and pos
     glfw.set_window_size(window, overlay_size[0], overlay_size[1])
     glfw.set_window_pos(window, overlay_pos[0], overlay_pos[1])
 
-    #Initialize blur renderer
-    blur_renderer = GaussianBlurRenderer(cap_w, cap_h, str(blur_glsl_path), input_format=input_format)
-    blur_renderer.set_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
+    # Initialize foveated blur renderer
+    foveated_renderer = FoveatedBlurRenderer(
+        cap_w, cap_h, 
+        str(blur_glsl_path), 
+        str(composite_glsl_path),
+        input_format=input_format
+    )
+    foveated_renderer.set_blur_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
+    foveated_renderer.set_foveal_params(foveal_radius=foveal_radius, transition_width=transition_width)
 
-    #Get the shader ready and set up the VAO for the fullscreen triangle. Simplest passthru shader possible
+    # Get the shader ready and set up the VAO for the fullscreen triangle. Simplest passthru shader possible
     display_prog = _create_display_shader()
     vao = glGenVertexArrays(1)
     glBindVertexArray(vao)
     glBindVertexArray(0)
     tex_loc = glGetUniformLocation(display_prog, "uTexture")
 
-    #No need for z buffering, the display is 2d and doesnt need depth test
+    # No need for z buffering, the display is 2d and doesn't need depth test
     glDisable(GL_DEPTH_TEST)
 
-    #FPS counter
+    # FPS counter
     frames = 0
     last_fps_t = time.perf_counter()
 
-    #Render loop
+    print(f"[eyetracking] Foveal radius: {foveal_radius:.2f}, Transition width: {transition_width:.2f}")
+
+    # Render loop
     try:
         while not glfw.window_should_close(window):
             t0 = time.perf_counter()
 
-            # 1)Capture a frame with dxgi_capture.py implementation
+            # 1) Capture a frame with dxgi_capture.py implementation
             frame = capture_desktop_excluding_hwnd(rgb=force_rgb)
-            if frame is None: #Wait for frame if not available yet
+            if frame is None:  # Wait for frame if not available yet
                 glfw.poll_events()
                 time.sleep(0.001)
                 continue
 
-            #Validate frame format
-            if frame.ndim != 3 or frame.shape[2] != 3:
+            # Validate frame format
+            if frame.ndim != 3 or frame.shape[2] !=3: #never expect 4 channels
                 print(f"[capture] Unexpected frame format: {frame.shape}")
                 glfw.poll_events()
                 time.sleep(0.001)
@@ -331,24 +379,27 @@ def main():
             if frame.shape[2] == 4 and input_format not in (GL_BGRA, GL_RGBA):
                 print("[capture] WARNING: Got 4-channel frame, but input_format is not GL_BGRA/GL_RGBA")
 
-            if not frame.flags["C_CONTIGUOUS"]: #need contiguous array for glTexSubImage2D upload
+            if not frame.flags["C_CONTIGUOUS"]:  # need contiguous array for glTexSubImage2D upload
                 frame = np.ascontiguousarray(frame) 
 
-            # 2)Process on GPU (separable blur passes).
-            #Applies the blur shader to captured frame, returns outputted tex handle
-            out_tex = blur_renderer.process(frame)
-            _check_gl_error("after blur process") #posts error if the blur shader fails in OpenGL
+            # 2) Get gaze position from tracker (Tobii hardware or mouse fallback)
+            gaze_pos = tracker.get_gaze_position()
 
-            # 3)Display on overlay
+            # 3) Process on GPU (foveated blur: sharp in fovea, blurred in periphery)
+            # Applies the blur shader to captured frame, then composites based on eccentricity
+            out_tex = foveated_renderer.process(frame, gaze_pos=gaze_pos)
+            _check_gl_error("after foveated process")  # posts error if the blur shader fails in OpenGL
+
+            # 4) Display on overlay
             fb_w, fb_h = glfw.get_framebuffer_size(window)
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
             glViewport(0, 0, fb_w, fb_h)
 
-            #Clear to transparent black 
+            # Clear to transparent black 
             glClearColor(0.0, 0.0, 0.0, 0.0)
             glClear(GL_COLOR_BUFFER_BIT)
 
-            #Draw to the screen
+            # Draw to the screen
             glUseProgram(display_prog)
             glActiveTexture(GL_TEXTURE0)
             glBindTexture(GL_TEXTURE_2D, out_tex)
@@ -356,29 +407,30 @@ def main():
             glBindVertexArray(vao)
             glDrawArrays(GL_TRIANGLES, 0, 3)
             glBindVertexArray(0)
-            _check_gl_error("after draw") #posts error if the display shader fails in OpenGL
+            _check_gl_error("after draw")  # posts error if the display shader fails in OpenGL
 
-            glfw.swap_buffers(window) #GPU syncs here, so rendered frame is presented after the call completes
-            glfw.poll_events() #Poll for new events like window close or keypresses
+            glfw.swap_buffers(window)  # GPU syncs here, so rendered frame is presented after the call completes
+            glfw.poll_events()  # Poll for new events like window close or keypresses
 
-            #FPS telemetry
+            # FPS telemetry
             frames += 1
             now = time.perf_counter()
             if now - last_fps_t >= 1.0:
-                print(f"FPS: {frames}  (excluded_from_capture={excluded})")
+                print(f"FPS: {frames}  (gaze: {gaze_pos[0]:.3f}, {gaze_pos[1]:.3f})  (excluded_from_capture={excluded})")
                 frames = 0
                 last_fps_t = now
 
-            #Frame pacing, looking for target_fps from settings, and sleeps if rendering goes too fast
-            #Avoids using 100% GPU on more FPS when it is not necessary
+            # Frame pacing, looking for target_fps from settings, and sleeps if rendering goes too fast
+            # Avoids using 100% GPU on more FPS when it is not necessary
             dt = time.perf_counter() - t0
             target_dt = 1.0 / max(1, int(target_fps))
             if dt < target_dt:
                 time.sleep(target_dt - dt)
 
-    #Cleanup resources on exit
+    # Cleanup resources on exit
     finally:
-        blur_renderer.cleanup()
+        tracker.cleanup()
+        foveated_renderer.cleanup()
         glDeleteProgram(display_prog)
         glDeleteVertexArrays(1, [vao])
         glfw.destroy_window(window)

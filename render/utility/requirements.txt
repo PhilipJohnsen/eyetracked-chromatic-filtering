@@ -6,3 +6,4 @@ glfw
 PyOpenGL
 PyOpenGL_accelerate 
 typing
+tobii-research

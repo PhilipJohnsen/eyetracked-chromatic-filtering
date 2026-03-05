@@ -227,14 +227,9 @@ class GaussianBlurRenderer:
     glBindTexture(GL_TEXTURE_2D, self.tex_in)
     glPixelStorei(GL_UNPACK_ALIGNMENT,1) #specified byte alignment for the 3 channels
     self._upload_count += 1
-    if self._upload_count == 1:
-      print("[gl] starting first glTexSubImage2D", flush=True)
-    t0 = time.perf_counter()
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.w, self.h, self.input_format, GL_UNSIGNED_BYTE, frame_rgb)
-    dt_ms = (time.perf_counter() - t0) * 1000.0
-    if self._upload_count == 1 or dt_ms > 10.0 or (self._upload_count % self._upload_log_every) == 0:
-      print(f"[gl] glTexSubImage2D took {dt_ms:.2f} ms (count={self._upload_count})", flush=True)
-    _check_gl_error("after glTexSubImage2D")
+    # Performance optimization: Disable timing prints that cause console I/O overhead
+    # _check_gl_error("after glTexSubImage2D")  # Also disabled: glGetError() causes GPU pipeline stalls
     glBindTexture(GL_TEXTURE_2D, 0)
 
   #Draw the fullscreen
@@ -259,10 +254,10 @@ class GaussianBlurRenderer:
     # set viewport for the FBO passes (match the FBO/texture size)
     glViewport(0, 0, self.w, self.h)
 
-    # 2) Horizontal pass: tex_in -> tex_temp
+    # 2)Horizontal pass: tex_in -> tex_temp
           #specifically DIR is H
     glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_temp)
-    _check_fbo_status("horizontal pass")
+    # _check_fbo_status("horizontal pass")  # Performance: glCheckFramebufferStatus causes pipeline stalls
     glClearColor(0.0, 0.0, 0.0, 1.0)
     glClear(GL_COLOR_BUFFER_BIT)
     glUseProgram(self.prog_h)
@@ -273,7 +268,7 @@ class GaussianBlurRenderer:
     # 3) Vertical pass: tex_temp -> tex_out
             #specifically DIR is V
     glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
-    _check_fbo_status("vertical pass")
+    # _check_fbo_status("vertical pass")  # Performance: glCheckFramebufferStatus causes pipeline stalls
     glClearColor(0.0, 0.0, 0.0, 1.0)
     glClear(GL_COLOR_BUFFER_BIT)
     glUseProgram(self.prog_v)

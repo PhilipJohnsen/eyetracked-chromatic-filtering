@@ -1,5 +1,4 @@
 # Eye-tracked Chromatic Filtering Settings
-# Lines starting with # are comments and ignored
 
 target_fps = 60
 force_rgb = False
@@ -17,3 +16,10 @@ radius_rgb = 1.283, 1.338, 6.135
 sigma_rgb = 0.91, 0.95, 4.34
 
 shader_path = "shader/blur.glsl"
+
+#Radius of screen in percent, that is fully clear (foveal center)
+#Or transitional towards the periphery that is blurred
+    #Calculated from gaze center to full blur is:
+    #foveal_radius+transition_radius = distance in %
+foveal_radius = 0.10
+transition_width = 0.10

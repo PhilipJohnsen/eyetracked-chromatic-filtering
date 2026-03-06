@@ -309,6 +309,10 @@ def main():
     frames = 0
     last_fps_t = time.perf_counter()
 
+    #Set Windows timer resolution to 1ms so time.sleep() is accurate for frame pacing.
+    #Default Windows timer resolution is 15.625ms, which rounds every sleep up and causes ~35fps.
+    ctypes.windll.winmm.timeBeginPeriod(1)
+
     #Render loop
     try:
         while not glfw.window_should_close(window):
@@ -378,6 +382,7 @@ def main():
 
     #Cleanup resources on exit
     finally:
+        ctypes.windll.winmm.timeEndPeriod(1)
         blur_renderer.cleanup()
         glDeleteProgram(display_prog)
         glDeleteVertexArrays(1, [vao])

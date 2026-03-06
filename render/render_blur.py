@@ -1,3 +1,4 @@
+import math
 import os
 import ctypes
 import numpy as np
@@ -109,6 +110,24 @@ def _check_gl_error(tag: str) -> None:
     err = glGetError()
 
 
+_MAX_RADIUS = 10  # Must match MAX_RADIUS in blur.glsl
+
+def _compute_weights(radius: int, sigma: float) -> np.ndarray:
+    """Returns normalized Gaussian weight array of length _MAX_RADIUS+1.
+    Index 0 is the center tap; indices 1..radius are symmetric tap weights.
+    Indices beyond radius are zero. radius=0 returns pass-through [1, 0, ...]."""
+    r = min(max(radius, 0), _MAX_RADIUS)
+    arr = np.zeros(_MAX_RADIUS + 1, dtype=np.float32)
+    if r == 0:
+        arr[0] = 1.0
+        return arr
+    s = max(sigma, 1e-6)
+    for i in range(r + 1):
+        arr[i] = math.exp(-0.5 * (i * i) / (s * s))
+    norm = arr[0] + 2.0 * float(arr[1:r+1].sum())
+    arr[:r+1] /= norm
+    return arr
+
 #Gaussian blur
 #----------------------
 class GaussianBlurRenderer:
@@ -133,7 +152,8 @@ class GaussianBlurRenderer:
     #core VAO
     self.vao = glGenVertexArrays(1)
     glBindVertexArray(self.vao)
-    
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+
     #programs
     self.prog_h = _compile_blur_program(blur_glsl_path, "H")
     self.prog_v = _compile_blur_program(blur_glsl_path, "V")
@@ -160,9 +180,8 @@ class GaussianBlurRenderer:
     #clean binds for futur
     glBindVertexArray(0)
 
-    self._upload_count = 0
-    self._upload_log_every = 120
-                    
+    self._viewport = None
+
   #Set the uniforms
   def _cache_uniforms(self):
     self.loc={}
@@ -178,7 +197,9 @@ class GaussianBlurRenderer:
       self.loc[(tag, "uInput")] = getloc(prog, "uInput")
       self.loc[(tag, "uTexelSize")] = getloc(prog, "uTexelSize")
       self.loc[(tag, "uRadiusRGB")] = getloc(prog, "uRadiusRGB")
-      self.loc[(tag, "uSigmaRGB")] = getloc(prog, "uSigmaRGB")
+      self.loc[(tag, "uWeightsR")] = getloc(prog, "uWeightsR[0]")
+      self.loc[(tag, "uWeightsG")] = getloc(prog, "uWeightsG[0]")
+      self.loc[(tag, "uWeightsB")] = getloc(prog, "uWeightsB[0]")
 
       #Bind sampler to texture unit 0 once
       glUseProgram(prog)
@@ -199,10 +220,16 @@ class GaussianBlurRenderer:
     rR, rG, rB = map(int, radius_rgb)
     sR, sG, sB = map(float, sigma_rgb)
 
+    wR = _compute_weights(rR, sR)
+    wG = _compute_weights(rG, sG)
+    wB = _compute_weights(rB, sB)
+
     for tag, prog in (("h", self.prog_h), ("v", self.prog_v)):
         glUseProgram(prog)
         glUniform3i(self.loc[(tag, "uRadiusRGB")], rR, rG, rB)
-        glUniform3f(self.loc[(tag, "uSigmaRGB")], sR, sG, sB)
+        glUniform1fv(self.loc[(tag, "uWeightsR")], 11, wR)
+        glUniform1fv(self.loc[(tag, "uWeightsG")], 11, wG)
+        glUniform1fv(self.loc[(tag, "uWeightsB")], 11, wB)
         glUseProgram(0)
 
   #Upload the frame
@@ -225,11 +252,7 @@ class GaussianBlurRenderer:
       raise ValueError("input_format must be GL_RGBA or GL_BGRA for 4-channel input")
 
     glBindTexture(GL_TEXTURE_2D, self.tex_in)
-    glPixelStorei(GL_UNPACK_ALIGNMENT,1) #specified byte alignment for the 3 channels
-    self._upload_count += 1
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, self.w, self.h, self.input_format, GL_UNSIGNED_BYTE, frame_rgb)
-    # Performance optimization: Disable timing prints that cause console I/O overhead
-    # _check_gl_error("after glTexSubImage2D")  # Also disabled: glGetError() causes GPU pipeline stalls
     glBindTexture(GL_TEXTURE_2D, 0)
 
   #Draw the fullscreen
@@ -249,47 +272,33 @@ class GaussianBlurRenderer:
     self.upload_frame(frame_rgb)
     glDisable(GL_DEPTH_TEST) #no need for z buffering test
 
-    # Save previous viewport to avoid leaking GL state into the main display
-    prev_viewport = glGetIntegerv(GL_VIEWPORT)
-    # set viewport for the FBO passes (match the FBO/texture size)
+    # Cache caller's viewport on first call to avoid per-frame GPU readback
+    if self._viewport is None:
+        self._viewport = np.array(glGetIntegerv(GL_VIEWPORT), dtype=np.int32)
     glViewport(0, 0, self.w, self.h)
 
-    # 2)Horizontal pass: tex_in -> tex_temp
-          #specifically DIR is H
-    glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_temp)
-    # _check_fbo_status("horizontal pass")  # Performance: glCheckFramebufferStatus causes pipeline stalls
-    glClearColor(0.0, 0.0, 0.0, 1.0)
-    glClear(GL_COLOR_BUFFER_BIT)
-    glUseProgram(self.prog_h)
     glActiveTexture(GL_TEXTURE0)
+
+    # 2) Horizontal pass: tex_in -> tex_temp
+    glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_temp)
+    glUseProgram(self.prog_h)
     glBindTexture(GL_TEXTURE_2D, self.tex_in)
     self._draw_fullscreen()
 
     # 3) Vertical pass: tex_temp -> tex_out
-            #specifically DIR is V
     glBindFramebuffer(GL_FRAMEBUFFER, self.fbo_out)
-    # _check_fbo_status("vertical pass")  # Performance: glCheckFramebufferStatus causes pipeline stalls
-    glClearColor(0.0, 0.0, 0.0, 1.0)
-    glClear(GL_COLOR_BUFFER_BIT)
     glUseProgram(self.prog_v)
-    glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, self.tex_temp)
     self._draw_fullscreen()
 
-    # Unbind the textures, now that the frame is filtered
+    # Unbind
     glBindTexture(GL_TEXTURE_2D, 0)
     glUseProgram(0)
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
-    # Restore previous viewport so we don't affect the window/framebuffer draw
-    try:
-      glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3])
-    except Exception:
-      # If retrieving/restoring the previous viewport failed for any reason,
-      # silently continue so we don't break the pipeline.
-      pass
+    # Restore caller's viewport
+    glViewport(self._viewport[0], self._viewport[1], self._viewport[2], self._viewport[3])
 
-    # return the GL tex ID of the filtered output
     return self.tex_out
 
 

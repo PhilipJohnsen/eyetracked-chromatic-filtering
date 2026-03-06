@@ -166,7 +166,7 @@ if __name__ == "__main__":
     #Unpack
     (target_fps, force_rgb, capture_format, debug_gl_finish, 
      gl_finish_interval, overlay_size, overlay_pos, 
-     radius_rgb, sigma_rgb, shader_path) = unpack_settings(settings)
+     radius_rgb, sigma_rgb, shader_path, foveal_radius, transition_width) = unpack_settings(settings)
     
     #Verify from settings.txt
     print("Loaded settings:")
@@ -180,3 +180,5 @@ if __name__ == "__main__":
     print(f"radius_rgb = {radius_rgb}")
     print(f"sigma_rgb = {sigma_rgb}")
     print(f"shader_path = {shader_path}")
+    print(f"foveal_radius = {foveal_radius}")
+    print(f"transition_width = {transition_width}")

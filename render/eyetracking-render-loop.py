@@ -357,6 +357,10 @@ def main():
 
     print(f"[eyetracking] Foveal radius: {foveal_radius:.2f}, Transition width: {transition_width:.2f}")
 
+    # Set Windows timer resolution to 1ms so time.sleep() is accurate for frame pacing.
+    # Default Windows timer resolution is 15.625ms, which rounds every sleep up and causes ~35fps.
+    ctypes.windll.winmm.timeBeginPeriod(1)
+
     # Render loop
     try:
         while not glfw.window_should_close(window):
@@ -429,6 +433,7 @@ def main():
 
     # Cleanup resources on exit
     finally:
+        ctypes.windll.winmm.timeEndPeriod(1)
         tracker.cleanup()
         foveated_renderer.cleanup()
         glDeleteProgram(display_prog)

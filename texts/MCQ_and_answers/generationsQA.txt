@@ -1,0 +1,20 @@
+Q: According to the passage, how long is one generation approximately?
+1: 12 years
+2: 22 years
+3: 35 years
+4: 50 years
+A: 2
+
+Q: How many generations are typically alive at the same time?
+1: 2
+2: 3
+3: 4
+4: 5
+A: 3
+
+Q: Which set lists the four archetypes named by Strauss and Howe?
+1: Idealist, Reactive, Civic, Adaptive
+2: Traditionalist, Rebel, Hero, Nomad
+3: Optimist, Realist, Pragmatist, Visionary
+4: Founder, Builder, Keeper, Reformer
+A: 1

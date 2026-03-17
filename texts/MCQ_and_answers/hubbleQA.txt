@@ -1,0 +1,20 @@
+Q: According to the passage, who had the idea for the Hubble Telescope?
+1: H.G. Wells
+2: Albert Einstein
+3: Lyman Spitzer, Jr.
+4: James Webb
+A: 3
+
+Q: The primary purpose of the passage is to
+1: draw a comparison between H.G. Wells' notion of time travel with Albert Einstein's Theory of Relativity
+2: discuss the construction of the Hubble Space Telescrope as a tool for exploring deep space
+3: describe the circumstances which underlay the mid-century national drive toward a large extra-terrestrial observatory
+4: examine difficulties with the precision of manufacture required to produce the Hubble Telescope
+A: 2
+
+Q: It can be inferred that the author regards time travel as 
+1: an effective hook for a work of fiction, but an improbability in the reality of astronomy
+2: an interesting literary notion, but proven to be impossible by Einstein’s Special Theory
+3: a ridiculous idea whose time has come and gone, as well as an astronomical improbability
+4: a persuasive topic in fiction, as well as a hypothetical possibility in light of Einstein’s Special Theory
+A: 4

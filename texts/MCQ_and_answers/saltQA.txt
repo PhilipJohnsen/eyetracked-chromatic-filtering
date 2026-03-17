@@ -1,0 +1,20 @@
+Q: The author's primary purpose is to
+1: relate the history of salt.
+2: describe the value of salt.
+3: enumerate the myriad uses of salt.
+4: Discuss the areas where salt was traded.
+A: 2
+
+Q: According to the text, what is the oldest known use of salt documented?
+1: Preserving fish for trade in ancient Egypt
+2: Salting meat for trade among Celtic people in the first millenium B.C.
+3: Using salt as currency to pay Roman soldiers
+4: Preserving food with salt from lake Xiechi in China around 6000 B.C.
+A: 4
+
+Q: The legend about the princess and the king is included primarily to illustrate what idea?
+1: That salt was historically considered an insult when given as a gift
+2: That daughters were traditionally more knowledgeable than their fathers
+3: That the value of salt was not always understood, even by powerful people
+4: That salt became important because of its symbolic role in ancient storytelling
+A: 3

@@ -1,0 +1,1 @@
+﻿The assistant checked the schedule and highlighted the next appointment in blue ink.

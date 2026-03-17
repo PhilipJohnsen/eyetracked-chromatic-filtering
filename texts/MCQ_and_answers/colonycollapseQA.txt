@@ -1,0 +1,20 @@
+Q: It can be inferred from the passage that the U.S. pollination industry is
+1: the top industrial pollinating nation in the world
+2: the second pollinating nation in the world
+3: among the top five pollinting nations in the world
+4: amongst the bottom ten pollinating nations in the world
+A: 3
+
+Q: In line 20, corroborated most closely means
+1: disputed
+2: omitted
+3: corrected
+4: supported
+A: 4
+
+Q: Based on the passage, what does CCD cause bees to do?
+1: Bees get lost and stop pollinating
+2: Bees bring a virus back to the hive
+3: Bees become very active and exhausted
+4: Bees suddenly, inexplicably attack their hive mates
+A: 2

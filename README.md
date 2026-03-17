@@ -18,7 +18,7 @@ The eye tracking technology used is from Tobii, a Swedish eye tracking hardware 
 ## Setup Guide
 Setting up this chromatic filtering is designed to be easily accessible. I recommend setting up a virtual environment to ensure compatibility across packages.
 ### Prerequisites
-- Python 3.10+
+- Python 3.10 (For compatibility with Tobii modules)
 - Windows 10/11
 - GPU with OpenGL support
 
@@ -40,11 +40,17 @@ git clone https://github.com/PhilipJohnsen/eyetracked-chromatic-filtering
 cd eyetracked-chromatic-filtering
 ```
 
-2. Create a virtual environment
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
+2. Create a virtual environment using Python 3.10
+
+   Make sure Python 3.10 is installed. You can verify by running:
+   ```bash
+   py -3.10 --version
+   ```
+   Then create and activate the environment:
+   ```bash
+   py -3.10 -m venv .venv
+   .venv\Scripts\activate
+   ```
 
 3. Install dependencies:
 ```bash
@@ -75,7 +81,23 @@ This will:
 - Capture real-time desktop images at your desired FPS (given hardware can keep up)
 - Apply chromatic aberration with gaussian blur kernel via GPU shader
 - Display the corrected output
-- Currently no smooth shutdown, close with CTRL+C keyboardinterrupt in the cmd from which you launched the program.
+- Close with CTRL+SHIFT+Q
+
+### Eyetracking mode
+To use, if you do have a Tobii branded eyetracker compatible with the Tobii_research module. 
+```bash
+.venv\Scripts\activate
+python render/eyetracking-render-loop.py
+```
+This will:
+- Initialize the Tobii eye tracker, creating a data stream of eye movement.
+- Open a borderless, overlay window that you can click through
+- Capture real-time desktop images at your desired FPS (given hardware can keep up)
+- Apply chromatic aberration with gaussian blur kernel via GPU shader
+- Mask out the foveal gaze circle which remains unaltered. Size changeable in /render/utility/settings.txt
+- Display the corrected output
+- Close with CTRL+SHIFT+Q
+
 
 ## Troubleshooting
 - **No frame captured**: Ensure DXcam can access your display

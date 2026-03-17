@@ -1,6 +1,6 @@
 # Eye-tracked Chromatic Filtering Settings
 
-target_fps = 60
+target_fps = 144
 force_rgb = False
 capture_format = "rgb"
 debug_gl_finish = True
@@ -21,5 +21,28 @@ shader_path = "shader/blur.glsl"
 #Or transitional towards the periphery that is blurred
     #Calculated from gaze center to full blur is:
     #foveal_radius+transition_radius = distance in %
-foveal_radius = 0.10
-transition_width = 0.10
+foveal_radius = 0.1175
+transition_width = 0.0585
+
+#Gaze source: "tobii" (hardware) or "mouse" (fallback)
+gaze_source = "tobii"
+
+#Blur kill-switch: set to False to run an unfiltered baseline condition
+#Eliminates performance differences for eyetrack vs non-eyetrack
+blur_active = True
+
+#Experiment metadata
+participant_id = 0
+session_id = 0
+
+#Gaze logging: write timestamped gaze positions to a CSV file (eyetracking loop only)
+log_gaze = False
+log_path = "gaze_log.csv"
+
+# Luminance correction for peripheral blur yellowing [0.0, 1.0].
+# The heavy blue-channel blur spreads blue away from bright pixels, making white
+# text appear yellow in the periphery.  This rescales the blurred pixel's colour
+# to match the original pixel's Rec.709 luminance, smoothing out the yellow cast
+# while preserving the chromatic fringe direction at high-contrast edges.
+# 0.0 = no correction (full yellow cast),  1.0 = fully luminance-preserving.
+lum_correction = 0.0

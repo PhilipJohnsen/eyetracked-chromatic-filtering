@@ -23,6 +23,7 @@ No custom EyeTracker/MouseTracker in tobii_research, so we wrap only for:
 
 import glfw
 import tobii_research as tr
+import time
 from typing import Tuple
 
 
@@ -52,7 +53,7 @@ class TobiiGazeTracker:
             eyetrackers = tr.find_all_eyetrackers()
             
             if not eyetrackers:
-                print("[eyetracking] ✗ No Tobii eye trackers found")
+                print("[eyetracking] [ERROR] No Tobii eye trackers found")
                 print("[eyetracking]   Ensure:")
                 print("[eyetracking]   - Device is connected and powered")
                 print("[eyetracking]   - Tobii Eye Tracker Manager is running")
@@ -63,18 +64,18 @@ class TobiiGazeTracker:
             self.tracker = eyetrackers[0]
             
             #Log device info from native tracker properties
-            print(f"[eyetracking] ✓ Connected to: {self.tracker.model}")
+            print(f"[eyetracking] [OK] Connected to: {self.tracker.model}")
             print(f"[eyetracking]   Serial: {self.tracker.serial_number}")
             print(f"[eyetracking]   Device: {self.tracker.device_name}")
             
             #Subscribe to gaze data stream
             self.tracker.subscribe_to(tr.EYETRACKER_GAZE_DATA, self._on_gaze_data)
-            print("[eyetracking] ✓ Subscribed to native gaze data stream")
+            print("[eyetracking] [OK] Subscribed to native gaze data stream")
             
             return True
         
         except Exception as e:
-            print(f"[eyetracking] ✗ Error initializing: {e}")
+            print(f"[eyetracking] [ERROR] Error initializing: {e}")
             return False
     
     def _on_gaze_data(self, gaze_data):
@@ -125,28 +126,114 @@ class TobiiGazeTracker:
         """
         return self._cached_position
     
-    def calibrate(self) -> bool:
-        """Guide user to Tobii's native calibration tool.
-        
-        Full calibration is best done through Tobii Eye Tracker Manager.
-        
+    def calibrate(
+        self,
+        point_presenter=None,
+        points=None,
+        retries: int = 1,
+        settle_time_s: float = 0.8,
+    ) -> bool:
+        """Run native Tobii screen-based calibration.
+
+        Uses tobii_research.ScreenBasedCalibration and collects points in normalized
+        display coordinates where (0,0) is top-left and (1,1) is bottom-right.
+
+        Args:
+            point_presenter: Optional callback called before each sample collection.
+                Signature:
+                  point_presenter(x, y, index, total, attempt) -> bool | None
+                Return False to abort calibration.
+            points: Optional sequence of normalized points [(x, y), ...].
+                Defaults to a 5-point pattern suitable for Tobii Pro Fusion.
+            retries: Number of additional passes for points that fail collection.
+            settle_time_s: Time to wait at each point before collect_data().
+
         Returns:
-            True
+            True if compute_and_apply succeeds, otherwise False.
         """
-        print("[eyetracking] ⓘ Calibration: Use Tobii Eye Tracker Manager")
-        print("[eyetracking]   1. Open Tobii Eye Tracker Manager")
-        print("[eyetracking]   2. Go to Calibration tab")
-        print("[eyetracking]   3. Follow on-screen guidance")
-        return True
+        if self.tracker is None:
+            print("[eyetracking] [ERROR] Cannot calibrate: tracker not initialized")
+            return False
+
+        if point_presenter is None:
+            print("[eyetracking] Calibration skipped: no point presenter was provided")
+            print("[eyetracking] Use ParticipantTest calibration segment for interactive setup")
+            return True
+
+        if points is None:
+            #Standard 5-point calibration pattern in display-area coordinates.
+            points = [
+                (0.50, 0.50),
+                (0.10, 0.10),
+                (0.90, 0.10),
+                (0.10, 0.90),
+                (0.90, 0.90),
+            ]
+
+        calibration = tr.ScreenBasedCalibration(self.tracker)
+        points_to_collect = list(points)
+
+        print("[eyetracking] Starting Tobii screen-based calibration...")
+
+        try:
+            calibration.enter_calibration_mode()
+
+            for attempt in range(retries + 1):
+                failed_points = []
+                total = len(points_to_collect)
+
+                for idx, (x, y) in enumerate(points_to_collect, start=1):
+                    if point_presenter is not None:
+                        should_continue = point_presenter(x, y, idx, total, attempt)
+                        if should_continue is False:
+                            print("[eyetracking] Calibration aborted by presenter callback")
+                            return False
+
+                    time.sleep(max(0.0, settle_time_s))
+                    status = calibration.collect_data(float(x), float(y))
+
+                    if status != tr.CALIBRATION_STATUS_SUCCESS:
+                        failed_points.append((x, y))
+                        print(f"[eyetracking]   collect_data failed at ({x:.2f}, {y:.2f})")
+
+                if not failed_points:
+                    break
+
+                #Discarding failed points before retry is recommended by Tobii flow.
+                for x, y in failed_points:
+                    calibration.discard_data(float(x), float(y))
+
+                points_to_collect = failed_points
+                print(
+                    f"[eyetracking] Retrying {len(points_to_collect)} failed points "
+                    f"(attempt {attempt + 1}/{retries})"
+                )
+
+            result = calibration.compute_and_apply()
+            if result.status == tr.CALIBRATION_STATUS_SUCCESS:
+                print("[eyetracking] [OK] Calibration applied successfully")
+                return True
+
+            print(f"[eyetracking] [ERROR] Calibration apply failed: {result.status}")
+            return False
+
+        except Exception as e:
+            print(f"[eyetracking] [ERROR] Calibration error: {e}")
+            return False
+        finally:
+            try:
+                calibration.leave_calibration_mode()
+            except Exception as e:
+                print(f"[eyetracking] [ERROR] Failed to leave calibration mode cleanly: {e}")
     
     def cleanup(self):
         """Unsubscribe from native tracker stream and cleanup."""
         if self.tracker is not None:
             try:
                 self.tracker.unsubscribe_from(tr.EYETRACKER_GAZE_DATA)
-                print("[eyetracking] ✓ Disconnected")
+                print("[eyetracking] [OK] Disconnected")
             except Exception as e:
-                print(f"[eyetracking] ✗ Cleanup error: {e}")
+                print(f"[eyetracking] [ERROR] Cleanup error: {e}")
             finally:
                 self.tracker = None
 
@@ -158,7 +245,7 @@ class MouseTracker:
         self.window = window
     
     def initialize(self) -> bool:
-        print("[eyetracking] ℹ Using mouse (development mode, no Tobii hardware)")
+        print("[eyetracking] [INFO] Using mouse (development mode, no Tobii hardware)")
         return True
     
     def get_gaze_position(self) -> Tuple[float, float]:
@@ -180,30 +267,29 @@ class MouseTracker:
         pass
 
 
-def initialize_eyetracker(window, prefer_tobii: bool = True):
+def initialize_eyetracker(window, gaze_source: str = "tobii"):
     """Initialize eye tracking: try native tobii_research hardware, fallback to mouse.
     
     Uses native tobii_research.find_all_eyetrackers() to detect hardware.
     
     Args:
         window: GLFW window
-        prefer_tobii: Try hardware first if True
+        gaze_source: "tobii" to attempt hardware (falls back to mouse if unavailable),
+                     "mouse" to force mouse tracker (development/baseline mode)
     
     Returns:
         TobiiGazeTracker or MouseTracker instance
     """
-    if prefer_tobii:
+    if gaze_source == "tobii":
         tracker = TobiiGazeTracker()
         if tracker.initialize():
             return tracker
-        print("[eyetracking] Falling back to mouse")
-        mt = MouseTracker(window)
-        mt.initialize()
-        return mt
+        print("[eyetracking] Tobii not found, falling back to mouse")
     else:
-        mt = MouseTracker(window)
-        mt.initialize()
-        return mt
+        print(f"[eyetracking] gaze_source='{gaze_source}': using mouse tracker")
+    mt = MouseTracker(window)
+    mt.initialize()
+    return mt
 
 
 # Legacy interface

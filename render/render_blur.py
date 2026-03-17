@@ -181,6 +181,7 @@ class GaussianBlurRenderer:
     glBindVertexArray(0)
 
     self._viewport = None
+    self.blur_active = True
 
   #Set the uniforms
   def _cache_uniforms(self):
@@ -232,6 +233,10 @@ class GaussianBlurRenderer:
         glUniform1fv(self.loc[(tag, "uWeightsB")], 11, wB)
         glUseProgram(0)
 
+  def set_blur_active(self, active: bool):
+    """Enable or disable blur. When False, process() returns the unmodified input frame."""
+    self.blur_active = bool(active)
+
   #Upload the frame
   def upload_frame(self, frame_rgb: np.ndarray):
     """Uploads the uint8 frame to self.tex_in.
@@ -270,6 +275,10 @@ class GaussianBlurRenderer:
     """
     # 1) upload the frame
     self.upload_frame(frame_rgb)
+
+    if not self.blur_active:
+      return self.tex_in
+
     glDisable(GL_DEPTH_TEST) #no need for z buffering test
 
     # Cache caller's viewport on first call to avoid per-frame GPU readback

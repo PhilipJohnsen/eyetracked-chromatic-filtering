@@ -27,11 +27,11 @@ class FoveatedBlurRenderer:
         self.h = int(height)
         self.input_format = input_format
         
-        # Initialize the Gaussian blur renderer for the blur pipeline
+        #Initialize the Gaussian blur renderer for the blur pipeline
         self.blur_renderer = GaussianBlurRenderer(width, height, blur_glsl_path, input_format)
         
-        # Create texture for the original (unblurred) frame
-        # We need to keep this separate from the blur pipeline
+        #Create texture for the original (unblurred) frame
+        #We need to keep this separate from the blur pipeline
         self.tex_original = _create_rgb8_texture(self.w, self.h)
         
         # Create texture for the final composited output
@@ -61,9 +61,14 @@ class FoveatedBlurRenderer:
         # Default foveal parameters (in normalized screen coordinates)
         self.foveal_radius = 0.05  # 5% of screen
         self.transition_width = 0.1  # 10% transition zone
+        self.aspect_ratio = 1.0   # corrected via set_foveal_params
+        self.blur_active = True
         
-        # Default gaze position (center of screen)
+        #Fallback gaze pos
         self.gaze_pos = (0.5, 0.5)
+
+        #Luminance correction strength (0 off, 1.0 full correction)
+        self.lum_correction = 0.0
     
     def _cache_composite_uniforms(self):
         """Cache uniform locations for the compositing shader."""
@@ -74,8 +79,10 @@ class FoveatedBlurRenderer:
         self.loc_gaze_pos = glGetUniformLocation(self.composite_prog, "uGazePos")
         self.loc_foveal_radius = glGetUniformLocation(self.composite_prog, "uFovealRadius")
         self.loc_transition_width = glGetUniformLocation(self.composite_prog, "uTransitionWidth")
+        self.loc_aspect_ratio = glGetUniformLocation(self.composite_prog, "uAspectRatio")
+        self.loc_lum_correction = glGetUniformLocation(self.composite_prog, "uLumCorrection")
         
-        # Bind texture samplers to texture units (do this once)
+        #Bind texture samplers to texture units (do this once)
         glUniform1i(self.loc_original, 0)  # texture unit 0
         glUniform1i(self.loc_blurred, 1)   # texture unit 1
         
@@ -85,16 +92,36 @@ class FoveatedBlurRenderer:
         """Set blur parameters (passed through to GaussianBlurRenderer)."""
         self.blur_renderer.set_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
     
-    def set_foveal_params(self, foveal_radius=0.05, transition_width=0.1):
+    def set_foveal_params(self, foveal_radius=0.05, transition_width=0.1, aspect_ratio=1.0):
         """Set foveal region parameters.
         
         Args:
             foveal_radius: Radius of sharp foveal region in normalized coordinates [0,1]
             transition_width: Width of transition zone from sharp to full blur
+            aspect_ratio: Screen width/height ratio: corrects the foveal boundary to be circular
         """
         self.foveal_radius = float(foveal_radius)
         self.transition_width = float(transition_width)
+        self.aspect_ratio = float(aspect_ratio)
     
+    def set_blur_active(self, active: bool):
+        """Enable or disable blur. When False, process() returns the unmodified input frame."""
+        self.blur_active = bool(active)
+
+    def set_lum_correction(self, strength: float):
+        """Set luminance correction strength for the blurred region.
+
+        The differential per-channel blur radii cause bright pixels to appear
+        yellow in the periphery (blue energy spreads more than red/green).
+        This correction rescales the blurred pixel's RGB to match the sharp
+        pixel's perceived luminance, smoothing out the yellow cast.
+
+        Args:
+            strength: 0.0 = no correction (full yellow cast),
+                      1.0 = fully luminance-preserving.
+        """
+        self.lum_correction = float(max(0.0, min(1.0, strength)))
+
     def upload_original_frame(self, frame_rgb: np.ndarray):
         """Upload the original frame to tex_original."""
         if frame_rgb is None:
@@ -133,7 +160,10 @@ class FoveatedBlurRenderer:
         
         # 1) Upload original frame (for foveal region)
         self.upload_original_frame(frame_rgb)
-        
+
+        if not self.blur_active:
+            return self.tex_original
+
         # 2) Process with Gaussian blur renderer (full blur)
         #    This handles uploading to its own tex_in and returns the blurred output
         tex_blurred = self.blur_renderer.process(frame_rgb)
@@ -161,6 +191,8 @@ class FoveatedBlurRenderer:
         glUniform2f(self.loc_gaze_pos, self.gaze_pos[0], self.gaze_pos[1])
         glUniform1f(self.loc_foveal_radius, self.foveal_radius)
         glUniform1f(self.loc_transition_width, self.transition_width)
+        glUniform1f(self.loc_aspect_ratio, self.aspect_ratio)
+        glUniform1f(self.loc_lum_correction, self.lum_correction)
         
         # Draw fullscreen triangle
         self._draw_fullscreen()

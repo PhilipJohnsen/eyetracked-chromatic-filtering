@@ -128,7 +128,14 @@ def unpack_settings(settings_dict):
         'sigma_rgb': (0.001, 1.0, 3.0),
         'shader_path': 'shader/blur.glsl',
         'foveal_radius': 0.08,
-        'transition_width': 0.12
+        'transition_width': 0.12,
+        'gaze_source': 'tobii',
+        'blur_active': True,
+        'participant_id': 0,
+        'session_id': 0,
+        'log_gaze': False,
+        'log_path': 'gaze_log.csv',
+        'lum_correction': 0.0,
     }
     
     # Update defaults with loaded settings
@@ -155,7 +162,14 @@ def unpack_settings(settings_dict):
         defaults['sigma_rgb'],
         defaults['shader_path'],
         defaults['foveal_radius'],
-        defaults['transition_width']
+        defaults['transition_width'],
+        defaults['gaze_source'],
+        defaults['blur_active'],
+        defaults['participant_id'],
+        defaults['session_id'],
+        defaults['log_gaze'],
+        defaults['log_path'],
+        defaults['lum_correction'],
     )
 
 
@@ -164,10 +178,12 @@ if __name__ == "__main__":
     settings = load_settings("settings.txt")
     
     #Unpack
-    (target_fps, force_rgb, capture_format, debug_gl_finish, 
-     gl_finish_interval, overlay_size, overlay_pos, 
-     radius_rgb, sigma_rgb, shader_path, foveal_radius, transition_width) = unpack_settings(settings)
-    
+    (target_fps, force_rgb, capture_format, debug_gl_finish,
+     gl_finish_interval, overlay_size, overlay_pos,
+     radius_rgb, sigma_rgb, shader_path, foveal_radius, transition_width,
+     gaze_source, blur_active, participant_id, session_id,
+     log_gaze, log_path) = unpack_settings(settings)
+
     #Verify from settings.txt
     print("Loaded settings:")
     print(f"target_fps = {target_fps}")
@@ -182,3 +198,9 @@ if __name__ == "__main__":
     print(f"shader_path = {shader_path}")
     print(f"foveal_radius = {foveal_radius}")
     print(f"transition_width = {transition_width}")
+    print(f"gaze_source = {gaze_source}")
+    print(f"blur_active = {blur_active}")
+    print(f"participant_id = {participant_id}")
+    print(f"session_id = {session_id}")
+    print(f"log_gaze = {log_gaze}")
+    print(f"log_path = {log_path}")

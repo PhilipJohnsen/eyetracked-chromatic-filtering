@@ -90,6 +90,22 @@ LWA_ALPHA = 0x00000002
 # Display affinity:
 #WDA_EXCLUDEFROMCAPTURE = 0x11 (from Win10 2004+)
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
+#Hotkey modifiers and message
+MOD_CTRL  = 0x0002
+MOD_SHIFT = 0x0004
+WM_HOTKEY = 0x0312
+
+#For checking message queue for hotkey presses
+class _MSG(ctypes.Structure):
+    """Minimal Win32 MSG struct for PeekMessageW."""
+    _fields_ = [
+        ("hwnd",    ctypes.c_void_p),
+        ("message", ctypes.c_uint),
+        ("wParam",  ctypes.c_size_t),
+        ("lParam",  ctypes.c_ssize_t),
+        ("time",    ctypes.c_uint),
+        ("pt",      ctypes.c_long * 2),
+    ]
 
 
 def _set_clickthrough_overlay_styles(hwnd: int) -> None:
@@ -208,7 +224,9 @@ def main():
     (target_fps, force_rgb, capture_format, 
      debug_gl_finish, gl_finish_interval, 
      overlay_size, overlay_pos, radius_rgb, sigma_rgb, 
-     shader_path, foveal_radius, transition_width) = unpack_settings(settings)
+     shader_path, foveal_radius, transition_width,
+     gaze_source, blur_active, participant_id, session_id,
+     log_gaze, log_path, lum_correction) = unpack_settings(settings)
     
     #Blur shader path (relative to this script, from settings)
     blur_glsl_path = Path(__file__).parent / shader_path
@@ -249,6 +267,16 @@ def main():
     print(f"[overlay] SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE) success: {excluded}")
     if not excluded:
         print("[overlay] WARNING: Failed to exclude from capture. This may cause feedback loops (blurred blur).")
+
+    #Register a global hotkey (Ctrl+Shift+Q) for graceful shutdown.
+    _HOTKEY_ID = 1
+    if not user32.RegisterHotKey(0, _HOTKEY_ID, MOD_CTRL | MOD_SHIFT, ord('Q')):
+        print("[overlay] WARNING: Failed to register Ctrl+Shift+Q hotkey (already in use?). Use CTRL+C to stop.")
+    else:
+        print("[overlay] Press Ctrl+Shift+Q to stop the render loop gracefully.")
+
+    #Prevent Windows from ghost-windowing this process.
+    user32.DisableProcessWindowsGhosting()
 
     #Capture the first frame to determine settings like resolution and format for the blur renderer.
     print("[capture] Capturing first frame to determine resolution...")
@@ -294,6 +322,7 @@ def main():
     #Initialize blur renderer
     blur_renderer = GaussianBlurRenderer(cap_w, cap_h, str(blur_glsl_path), input_format=input_format)
     blur_renderer.set_params(radius_rgb=radius_rgb, sigma_rgb=sigma_rgb)
+    blur_renderer.set_blur_active(blur_active)
 
     #Get the shader ready and set up the VAO for the fullscreen triangle. Simplest passthru shader possible
     display_prog = _create_display_shader()
@@ -308,15 +337,21 @@ def main():
     #FPS counter
     frames = 0
     last_fps_t = time.perf_counter()
+    total_frames = 0  # absolute frame counter used for glFinish interval
+    last_frame_delay_ms = 0.0  # capture-to-display latency of the most recent frame
+
+    print(f"[session] participant_id={participant_id}, session_id={session_id}, blur_active={blur_active}")
 
     #Set Windows timer resolution to 1ms so time.sleep() is accurate for frame pacing.
     #Default Windows timer resolution is 15.625ms, which rounds every sleep up and causes ~35fps.
     ctypes.windll.winmm.timeBeginPeriod(1)
 
     #Render loop
+    _msg = _MSG()  #Reused every frame, allocate once outside the loop
     try:
         while not glfw.window_should_close(window):
             t0 = time.perf_counter()
+            t_capture_start = t0
 
             # 1)Capture a frame with dxgi_capture.py implementation
             frame = capture_desktop_excluding_hwnd(rgb=force_rgb)
@@ -363,15 +398,35 @@ def main():
             _check_gl_error("after draw") #posts error if the display shader fails in OpenGL
 
             glfw.swap_buffers(window) #GPU syncs here, so rendered frame is presented after the call completes
+            glFinish()  # ensure GPU has finished before measuring
+            last_frame_delay_ms = (time.perf_counter() - t_capture_start) * 1000
+
+            #Check for Ctrl+Shift+Q BEFORE polling and clearing w/ poll_events():
+            if user32.PeekMessageW(ctypes.byref(_msg), None, WM_HOTKEY, WM_HOTKEY, 1):
+                if _msg.wParam == _HOTKEY_ID:
+                    print("[overlay] Ctrl+Shift+Q detected — shutting down.")
+                    glfw.set_window_should_close(window, True)
+
             glfw.poll_events() #Poll for new events like window close or keypresses
 
             #FPS telemetry
             frames += 1
+            total_frames += 1
             now = time.perf_counter()
             if now - last_fps_t >= 1.0:
                 print(f"FPS: {frames}  (excluded_from_capture={excluded})")
                 frames = 0
                 last_fps_t = now
+
+            #Print last known capture-to-display latency every 60 frames
+            if total_frames % 60 == 0 and total_frames > 0:
+                print(f"[latency] last frame delay: {last_frame_delay_ms:.1f}ms")
+
+            #Periodic GPU latency measurement (when debug_gl_finish = True in settings)
+            if debug_gl_finish and (total_frames % gl_finish_interval == 0):
+                _t_gf = time.perf_counter()
+                glFinish()
+                print(f"[debug] glFinish frame {total_frames}: {(time.perf_counter()-_t_gf)*1000:.2f}ms")
 
             #Frame pacing, looking for target_fps from settings, and sleeps if rendering goes too fast
             #Avoids using 100% GPU on more FPS when it is not necessary
@@ -382,6 +437,7 @@ def main():
 
     #Cleanup resources on exit
     finally:
+        user32.UnregisterHotKey(0, _HOTKEY_ID)
         ctypes.windll.winmm.timeEndPeriod(1)
         blur_renderer.cleanup()
         glDeleteProgram(display_prog)

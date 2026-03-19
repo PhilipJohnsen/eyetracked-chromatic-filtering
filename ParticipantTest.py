@@ -33,8 +33,6 @@ import tkinter as tk
 import tkinter.font as tkfont
 from pathlib import Path
 
-from render.init_eyetracking import TobiiGazeTracker
-
 
 # ---------------------------------------------------------------------------
 # Experiment content
@@ -192,7 +190,7 @@ if not MCQ_ITEMS:
 DETECTABILITY_TRIAL_MAP = _load_detectability_trial_map_from_dir(DETECTABILITY_TEXT_DIR)
 DETECTABILITY_TEXTS = list(DETECTABILITY_TRIAL_MAP.values())
 
-if not DETECTABILITY_TEXTS: #fallback if cannot read from directory
+if not DETECTABILITY_TEXTS:  # fallback if cannot read from directory
     print(f"WARNING: No detectability texts found in {DETECTABILITY_TEXT_DIR}. Using hardcoded defaults.")
     DETECTABILITY_TEXTS = [
         "Morning sunlight stretched across the library tables as students settled into quiet reading.",
@@ -258,11 +256,7 @@ class DarkInfoCopy:
 @dataclass(frozen=True)
 class CalibrationCopy:
     title: str
-    setup: str
-    tracker_missing: str
-    progress_template: str
-    success: str
-    failure: str
+    body: str
 
 
 INTRO_COPY = DarkInfoCopy(
@@ -288,7 +282,7 @@ DETECTABILITY_ACK_COPY = DarkInfoCopy(
     title="Detectability",
     body=(
         "You will read short text snippets with different blur conditions.\n"
-        "Each snippet is shown for 5 seconds.\n"
+        "Each snippet is shown for 3 seconds.\n"
         "Afterward, you will answer what blur type you think was shown.\n\n"
         "You will start with detectability trials 1-6, then complete 3 blocks of 12 trials.\n\n"
         "1 = No blur\n"
@@ -320,7 +314,7 @@ DETECTABILITY_TRANSITION_COPY = DarkInfoCopy(
     title="Detectability Trials",
     body=(
         "You will now continue to the detectability trials.\n\n"
-        "A short text snippet will be displayed for 5 seconds.\n"
+        "A short text snippet will be displayed for 3 seconds.\n"
         "Please read the text and determine which filter is active.\n\n"
         "1 = No blur\n"
         "2 = Full blur\n"
@@ -358,31 +352,12 @@ STUDY_PURPOSE_COPY = DarkInfoCopy(
 
 CALIBRATION_COPY = CalibrationCopy(
     title="Calibration",
-    setup=(
-        "Calibration Setup\n\n"
-        "Press SPACE to start eye-tracker calibration.\n"
-        "Press CTRL+SHIFT+Q to quit."
-    ),
-    tracker_missing=(
-        "No Tobii tracker detected.\n\n"
-        "Press SPACE to continue in development mode (skip calibration).\n"
-        "Press CTRL+SHIFT+Q to quit.\n\n"
-        "When Tobii Pro Fusion is available, rerun calibration."
-    ),
-    progress_template=(
-        "Calibrating... Point {index}/{total}\n"
-        "Attempt {attempt}\n\n"
-        "Keep your head still and look at the white dot.\n"
-        "Press CTRL+SHIFT+Q to quit."
-    ),
-    success=(
-        "Calibration complete.\n\n"
-        "Press SPACE to continue.\n"
-        "Press CTRL+SHIFT+Q to quit."
-    ),
-    failure=(
-        "Calibration failed or was interrupted.\n\n"
-        "Press CTRL+SHIFT+Q to quit."
+    body=(
+        "Calibration will now be performed by the experimenter using the Tobii Pro Fusion eye tracker.\n\n"
+        "Please sit comfortably and follow the experimenter's instructions.\n\n"
+        "Ask the experimenter to start calibration in the Tobii Eye Tracking Manager.\n\n"
+        "Press SPACE when the experimenter tells you that calibration is complete.\n\n"
+        "Press CTRL+SHIFT+Q to quit at any time."
     ),
 )
 
@@ -846,7 +821,7 @@ class ParticipantExperiment:
                 raw = arg.split("=", 1)[1].strip()
                 if raw.isdigit() and int(raw) > 0:
                     return int(raw)
-            if arg == "--participant" and idx + 1 < len(argv):
+            if arg == "--participant" and idx + 1 < argv:
                 raw = argv[idx + 1].strip()
                 if raw.isdigit() and int(raw) > 0:
                     return int(raw)
@@ -1462,92 +1437,22 @@ class ParticipantExperiment:
             self._check_renderer_status()
         return ok
 
-
-
     # -- experiment segments --------------------------------------------------
     def run_introduction_segment(self) -> bool:
         return self._dark_info.show(**asdict(INTRO_COPY))
 
     def run_calibration_segment(self) -> bool:
-        panel = self._dark_info._build_light_panel(relwidth=0.68, relheight=0.72)
-        self._dark_info._add_section_banner(panel, "CALIBRATION")
+        """Calibration slide with instructions only.
 
-        title_label = tk.Label(
-            panel,
-            text=CALIBRATION_COPY.title,
-            fg="black",
-            bg="#FAFAFA",
-            font=("Verdana", 32, "bold"),
-            justify=tk.LEFT,
-            anchor="w",
+        Actual eye-tracker calibration is handled externally via
+        the Tobii Eye Tracking Manager (Tobii Pro Fusion).
+        """
+        return self._dark_info.show(
+            title=CALIBRATION_COPY.title,
+            body=CALIBRATION_COPY.body,
+            relwidth=0.68,
+            relheight=0.72,
         )
-        title_label.pack(fill=tk.X, padx=54, pady=(0, 20))
-
-        status_label = tk.Label(
-            panel,
-            text=CALIBRATION_COPY.setup,
-            fg="black",
-            bg="#FAFAFA",
-            font=("Verdana", 18),
-            justify=tk.LEFT,
-            anchor="w",
-        )
-        status_label.pack(fill=tk.X, padx=54, pady=(0, 24))
-
-        canvas = tk.Canvas(panel, bg="#FAFAFA", highlightthickness=0)
-        canvas.pack(fill=tk.BOTH, expand=True, padx=54, pady=(0, 56))
-
-        if self._wait_for_keys({"<space>": "START"}) != "START":
-            return False
-
-        tracker = TobiiGazeTracker()
-        if not tracker.initialize():
-            status_label.config(text=CALIBRATION_COPY.tracker_missing)
-            return self._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
-
-        def _present_point(x: float, y: float, index: int, total: int, attempt: int) -> bool:
-            if self.quit_requested:
-                return False
-
-            self.root.update_idletasks()
-            width = max(1, canvas.winfo_width())
-            height = max(1, canvas.winfo_height())
-            cx = int(x * width)
-            cy = int(y * height)
-            radius = 18
-
-            canvas.delete("all")
-            canvas.create_oval(
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
-                fill="#0A3558",
-                outline="#0A3558",
-            )
-            status_label.config(
-                text=CALIBRATION_COPY.progress_template.format(
-                    index=index,
-                    total=total,
-                    attempt=attempt + 1,
-                )
-            )
-            self._ensure_focus()
-            return not self.quit_requested
-
-        success = False
-        try:
-            success = tracker.calibrate(point_presenter=_present_point)
-        finally:
-            tracker.cleanup()
-
-        if success and not self.quit_requested:
-            canvas.delete("all")
-            status_label.config(text=CALIBRATION_COPY.success)
-            return self._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
-
-        status_label.config(text=CALIBRATION_COPY.failure)
-        return False
 
     def run_reading_comprehension_intro_screen(self) -> bool:
         return self._dark_info.show(**asdict(READING_COMPREHENSION_INTRO_COPY))

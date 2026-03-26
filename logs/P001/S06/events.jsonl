@@ -1,0 +1,12 @@
+{"event_type": "session_started", "timestamp_utc": "2026-03-25T11:34:09.987837Z", "payload": {"participant_id": "P001", "session_id": "S06", "participant_number": 1, "latin_variant_index": 0, "fallback_active": false, "fallback_reason": ""}}
+{"event_type": "practice_reading_started", "timestamp_utc": "2026-03-25T11:34:12.044743Z", "payload": {"paragraph_file": "generations.txt"}}
+{"event_type": "practice_reading_completed", "timestamp_utc": "2026-03-25T11:34:12.424618Z", "payload": {"reading_time_sec": 0.379, "elapsed_s": 0.379, "status": "ok"}}
+{"event_type": "mcq_practice-mcq_started", "timestamp_utc": "2026-03-25T11:34:12.424618Z", "payload": {"headline_prefix": "Practice Question", "n_items": 3}}
+{"event_type": "mcq_trial", "timestamp_utc": "2026-03-25T11:34:13.299766Z", "payload": {"log_prefix": "practice-mcq", "trial_index": 1, "choice": 2, "correct": 2, "is_correct": true, "rt_ms": 873}}
+{"event_type": "mcq_trial", "timestamp_utc": "2026-03-25T11:34:13.504759Z", "payload": {"log_prefix": "practice-mcq", "trial_index": 2, "choice": 2, "correct": 3, "is_correct": false, "rt_ms": 204}}
+{"event_type": "mcq_trial", "timestamp_utc": "2026-03-25T11:34:13.530816Z", "payload": {"log_prefix": "practice-mcq", "trial_index": 3, "choice": 3, "correct": 1, "is_correct": false, "rt_ms": 25}}
+{"event_type": "mcq_practice-mcq_completed", "timestamp_utc": "2026-03-25T11:34:13.531816Z", "payload": {"n_items": 3, "correct": 1, "accuracy_pct": 33.333, "mean_rt_ms": 367, "elapsed_s": 1.107, "status": "ok"}}
+{"event_type": "reading_task_reminder_1_started", "timestamp_utc": "2026-03-25T11:34:13.531816Z", "payload": {"paragraph_index": 1}}
+{"event_type": "reading_task_reminder_1_completed", "timestamp_utc": "2026-03-25T11:34:15.344626Z", "payload": {"elapsed_s": 1.812, "status": "quit"}}
+{"event_type": "eye_capture_windows_finalized", "timestamp_utc": "2026-03-25T11:34:15.344626Z", "payload": {"n_windows": 3, "n_windows_with_tracker_timestamps": 0, "by_condition": {"none": 3}, "with_tracker_timestamps_by_condition": {}, "tracker_connected": false}}
+{"event_type": "session_completed", "timestamp_utc": "2026-03-25T11:34:15.347637Z", "payload": {"status": "quit", "outcome_status_counts": {"pending": 5, "pending_surveyxact": 3, "pending_eyetracker_pipeline": 4}}}

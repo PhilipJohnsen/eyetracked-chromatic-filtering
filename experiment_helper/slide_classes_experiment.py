@@ -530,6 +530,11 @@ class TimedBreakScreen(BaseScreen):
         )
         timer_label.pack(fill=tk.X, padx=54, pady=(0, 26))
 
+        # Drop any stale queued skip from earlier screens so this break only
+        # fast-forwards on an intentional Ctrl+Shift+R during this break.
+        while self._exp._consume_timer_skip():
+            pass
+
         self._exp._timer_wait_active = True
         try:
             for remaining in range(max(1, duration_s), 0, -1):

@@ -6,3 +6,7 @@ env/
 __pycache__/
 *.pyc
 *.pyo
+
+# Keep logs directory in repo, but never commit its contents (PII risk).
+logs/**
+!logs/.gitkeep

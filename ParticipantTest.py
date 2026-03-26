@@ -119,6 +119,15 @@ DETECTABILITY_PRE_TRIAL_PAUSE_S = 3.5  # Black screen before stimulus (allows re
 DETECTABILITY_POST_TRIAL_PAUSE_S = 0.2  # Black screen after stimulus
 DETECTABILITY_READING_TIME_S = 3.0  # Duration each stimulus text is displayed
 
+#Eye movement event extraction
+#Generally taken from Kar's paper in IEEE
+EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S = 2.0 #2 seems to work when testing on my own saccades and fixations
+EYE_EVENT_MIN_FIXATION_MS = 50.0 #Lower than Kar, to ensure that small fixations are not missed
+EYE_EVENT_MIN_SACCADE_MS = 24.0 #Minimum duration for saccade, a bit higher than Kar to be less trigger happy on saccade event
+EYE_EVENT_MAX_SACCADE_MS = 200.0 #Maximum duration for saccade, same as Kar
+EYE_EVENT_MIN_BLINK_MS = 100.0 #Lower than Kar (who has 300ms), to ensure no blinks are missed
+EYE_EVENT_MAX_INTER_SAMPLE_GAP_S = 0.05 #Forced gap between sampling to avoid casematching fixations or blinks due to no new info
+
 # Blur conditions and counterbalancing design
 FILTER_CONDITIONS = ["none", "full", "eyetracked"]  # The three conditions
 # All permutations of conditions for Latin-square counterbalancing
@@ -217,7 +226,6 @@ class ParticipantExperiment:
         except ExperimentContentError as exc:
             self._show_fatal_startup_error(str(exc))
             raise
-        self.session_started_utc = self._utc_now_iso()
     # Session IDs and logging paths
 
         self.participant_id = f"P{self.participant_number:03d}"
@@ -269,6 +277,9 @@ class ParticipantExperiment:
         self.outcomes["saccades_count"]["status"] = "pending_eyetracker_pipeline"
         self.outcomes["saccades_duration_ms"]["status"] = "pending_eyetracker_pipeline"
         self.outcomes["fixations_count_and_length_ms"]["status"] = "pending_eyetracker_pipeline"
+        
+        # Record session start time (now that _session_logger is initialized)
+        self.session_started_utc = self._utc_now_iso()
     # Initialize session logging (creates directories and log file handles)
 
         self._init_session_logging()
@@ -657,7 +668,15 @@ class ParticipantExperiment:
         if tracker is None or not windows_with_timestamps:
             return
 
-        summaries = tracker.summarize_eye_movement_windows(windows_with_timestamps)
+        summaries = tracker.summarize_eye_movement_windows(
+            windows_with_timestamps,
+            velocity_threshold_ndc_per_s=EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S,
+            min_fixation_ms=EYE_EVENT_MIN_FIXATION_MS,
+            min_saccade_ms=EYE_EVENT_MIN_SACCADE_MS,
+            max_saccade_ms=EYE_EVENT_MAX_SACCADE_MS,
+            min_blink_ms=EYE_EVENT_MIN_BLINK_MS,
+            max_inter_sample_gap_s=EYE_EVENT_MAX_INTER_SAMPLE_GAP_S,
+        )
         if summaries:
             self.attach_eye_movement_window_summaries(summaries)
 
@@ -1047,8 +1066,13 @@ class ParticipantExperiment:
     def _ensure_focus(self) -> None:
         """Bring window to front and request keyboard focus (called before waiting for keys)."""
         self.root.update_idletasks()
-        self.root.lift()
-        self.root.focus_force()
+        # If blur overlay is active, avoid lifting the Tk window above it.
+        # The overlay is click-through and non-focusable, so keyboard focus
+        # typically remains on this app without forcing z-order changes.
+        blur_active = self.active_blur_process is not None and self.active_blur_process.poll() is None
+        if not blur_active:
+            self.root.lift()
+            self.root.focus_force()
 
     def _show_frame(self, bg: str) -> tk.Frame:
         """Create/clear current frame with given background color. Returns the frame.
@@ -1127,18 +1151,21 @@ class ParticipantExperiment:
             else "eyetracking-render-loop.py"
         )
         render_dir = self.base_dir / "render"
+        script_path = render_dir / script_name
         log_path = self.base_dir / "logs" / "detectability_render.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.active_blur_log_handle = open(log_path, "a", encoding="utf-8")
         self.active_blur_log_handle.write(
-            f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] START condition={condition} script={script_name}\n"
+            f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] START condition={condition} script={script_path}\n"
         )
         self.active_blur_log_handle.flush()
 
         try:
+            if not script_path.exists():
+                raise FileNotFoundError(f"Renderer script not found: {script_path}")
             self.active_blur_process = subprocess.Popen(
-                [sys.executable, script_name],
+                [sys.executable, "-u", str(script_path)],
                 cwd=str(render_dir),
                 stdout=self.active_blur_log_handle,
                 stderr=self.active_blur_log_handle,
@@ -1238,81 +1265,36 @@ class ParticipantExperiment:
         return self._dark_info.show(**asdict(INTRO_COPY))
 
     def run_calibration_segment(self) -> bool:
-        panel = self._dark_info._build_light_panel(relwidth=0.68, relheight=0.72)
-        self._dark_info._add_section_banner(panel, "CALIBRATION")
+        """Display calibration instruction screen and wait for experimenter.
+        
+        Simply informs the participant that eye tracking calibration is required
+        and to wait for the experimenter to open the calibration software.
+        """
+        try:
+            # Allow switching to external calibration software (Alt+Tab).
+            self.root.attributes("-topmost", False)
+        except tk.TclError:
+            pass
 
-        title_label = tk.Label(
-            panel,
-            text=CALIBRATION_COPY.title,
-            fg="black",
-            bg="#FAFAFA",
-            font=("Verdana", 32, "bold"),
-            justify=tk.LEFT,
-            anchor="w",
-        )
-        title_label.pack(fill=tk.X, padx=54, pady=(0, 20))
-
-        status_label = tk.Label(
-            panel,
-            text=CALIBRATION_COPY.setup,
-            fg="black",
-            bg="#FAFAFA",
-            font=("Verdana", 18),
-            justify=tk.LEFT,
-            anchor="w",
-        )
-        status_label.pack(fill=tk.X, padx=54, pady=(0, 24))
-
-        canvas = tk.Canvas(panel, bg="#FAFAFA", highlightthickness=0)
-        canvas.pack(fill=tk.BOTH, expand=True, padx=54, pady=(0, 56))
-
-        if self._wait_for_keys({"<space>": "START"}) != "START":
-            return False
-
-        tracker = self._ensure_session_eyetracker(force_retry=True)
-        if tracker is None:
-            status_label.config(text=CALIBRATION_COPY.tracker_missing)
-            return self._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
-
-        def _present_point(x: float, y: float, index: int, total: int, attempt: int) -> bool:
-            if self.quit_requested:
-                return False
-
-            self.root.update_idletasks()
-            width = max(1, canvas.winfo_width())
-            height = max(1, canvas.winfo_height())
-            cx = int(x * width)
-            cy = int(y * height)
-            radius = 18
-
-            canvas.delete("all")
-            canvas.create_oval(
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
-                fill="#0A3558",
-                outline="#0A3558",
+        try:
+            return self._dark_info.show(
+                title="Eye Tracker Calibration",
+                body=(
+                    "The eye tracker needs to be calibrated.\n\n"
+                    "Please wait for the experimenter to open\n"
+                    "the calibration software.\n\n"
+                    "Follow the instructions on the calibration screen.\n\n"
+                    "Press SPACE when calibration is complete."
+                ),
             )
-            status_label.config(
-                text=CALIBRATION_COPY.progress_template.format(
-                    index=index,
-                    total=total,
-                    attempt=attempt + 1,
-                )
-            )
-            self._ensure_focus()
-            return not self.quit_requested
+        finally:
+            # Restore always-on-top for the rest of the experiment flow.
+            try:
+                self.root.attributes("-topmost", True)
+                self._ensure_focus()
+            except tk.TclError:
+                pass
 
-        success = tracker.calibrate(point_presenter=_present_point)
-
-        if success and not self.quit_requested:
-            canvas.delete("all")
-            status_label.config(text=CALIBRATION_COPY.success)
-            return self._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
-
-        status_label.config(text=CALIBRATION_COPY.failure)
-        return False
 
     def run_reading_comprehension_intro_screen(self) -> bool:
         return self._dark_info.show(**asdict(READING_COMPREHENSION_INTRO_COPY))
@@ -1422,6 +1404,10 @@ class ParticipantExperiment:
             return [str(name) for name in files][:3]
         return []
 
+    def _comprehension_filter_order(self) -> list[str]:
+        """Return the 3 reading-comprehension filter conditions for this participant."""
+        return self._build_latin_filter_order(3, block_offset=0)
+
     def run_reading_comprehension_paragraph(self, paragraph_index: int) -> bool:
         paragraph_files = self._comprehension_paragraph_files()
         if paragraph_index < 1 or paragraph_index > len(paragraph_files):
@@ -1436,26 +1422,57 @@ class ParticipantExperiment:
             return False
 
         paragraph_file = paragraph_files[paragraph_index - 1]
+        filter_order = self._comprehension_filter_order()
+        condition = filter_order[paragraph_index - 1] if paragraph_index - 1 < len(filter_order) else "none"
+
+        # Reuse the detectability trigger path so renderer startup/timing is identical.
+        if not self._black_transition(
+            start_condition=condition,
+            duration_s=DETECTABILITY_PRE_TRIAL_PAUSE_S,
+        ):
+            return False
+
+        if condition != "none" and not self.last_blur_start_ok:
+            print(f"[reading] WARNING: {self.last_blur_start_msg}")
+
         segment = f"reading_paragraph_{paragraph_index}"
-        self._segment_start(segment, {"paragraph_index": paragraph_index, "paragraph_file": paragraph_file})
-        started = time.perf_counter()
-        ok = self._light_text.show(
-            header=(
-                f"Reading Comprehension Paragraph {paragraph_index}\n"
-                "Read carefully. MCQs will follow."
-            ),
-            body=self._paragraph_text_for_file(paragraph_file),
-            footer="Press SPACE to continue to the questions. Press CTRL+SHIFT+Q to quit.",
-        )
-        elapsed = round(time.perf_counter() - started, 3)
-        if ok:
-            self._reading_time_by_index[paragraph_index] = elapsed
-        self._segment_end(
+        self._segment_start(
             segment,
-            status="ok" if ok else "quit",
-            metrics={"paragraph_file": paragraph_file, "reading_time_sec": elapsed},
+            {
+                "paragraph_index": paragraph_index,
+                "paragraph_file": paragraph_file,
+                "condition": condition,
+            },
         )
-        return ok
+        started = time.perf_counter()
+        try:
+            ok = self._light_text.show(
+                header=(
+                    f"Reading Comprehension Paragraph {paragraph_index}\n"
+                    "Read carefully. MCQs will follow."
+                ),
+                body=self._paragraph_text_for_file(paragraph_file),
+                footer="Press SPACE to continue to the questions. Press CTRL+SHIFT+Q to quit.",
+            )
+            elapsed = round(time.perf_counter() - started, 3)
+            if ok:
+                self._reading_time_by_index[paragraph_index] = elapsed
+            self._segment_end(
+                segment,
+                status="ok" if ok else "quit",
+                metrics={
+                    "paragraph_file": paragraph_file,
+                    "condition": condition,
+                    "reading_time_sec": elapsed,
+                },
+            )
+            return ok
+        finally:
+            # Match detectability shutdown flow: stop blur during a black transition.
+            self._black_transition(
+                stop_blur=True,
+                duration_s=DETECTABILITY_POST_TRIAL_PAUSE_S,
+            )
 
     def run_reading_comprehension_mcq(self, paragraph_index: int) -> bool:
         paragraph_files = self._comprehension_paragraph_files()

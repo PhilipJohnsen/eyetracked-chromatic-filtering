@@ -1,4 +1,0 @@
-participant_id,participant_number,session_id,label,section,section_index,phase,step,condition,trial_index,trial_file,status,tracker_available,has_tracker_timestamps,start_system_time_stamp,end_system_time_stamp,start_utc,end_utc,elapsed_s
-P001,1,S06,practice_reading,,0,,,none,0,,ok,False,False,0,0,2026-03-25T11:34:12.044743Z,2026-03-25T11:34:12.424618Z,0.379
-P001,1,S06,mcq_practice-mcq,,0,,,none,0,,ok,False,False,0,0,2026-03-25T11:34:12.424618Z,2026-03-25T11:34:13.531816Z,1.107
-P001,1,S06,reading_task_reminder_1,,0,,,none,0,,quit,False,False,0,0,2026-03-25T11:34:13.531816Z,2026-03-25T11:34:15.344121Z,1.812

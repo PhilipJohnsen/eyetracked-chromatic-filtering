@@ -1,4 +1,0 @@
-segment_name,started_at_utc,ended_at_utc,status,metrics_json
-practice_reading,2026-03-25T11:15:15.147203Z,2026-03-25T11:15:15.924610Z,ok,"{""reading_time_sec"": 0.776, ""elapsed_s"": 0.777}"
-mcq_practice-mcq,2026-03-25T11:15:15.924610Z,2026-03-25T11:15:16.410232Z,ok,"{""n_items"": 3, ""correct"": 0, ""accuracy_pct"": 0.0, ""mean_rt_ms"": 160, ""elapsed_s"": 0.485}"
-reading_task_reminder_1,2026-03-25T11:15:16.410232Z,2026-03-25T11:15:17.570641Z,quit,"{""elapsed_s"": 1.16}"

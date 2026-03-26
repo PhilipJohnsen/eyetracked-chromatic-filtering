@@ -22,7 +22,7 @@ shader_path = "shader/blur.glsl"
     #Calculated from gaze center to full blur is:
     #foveal_radius+transition_radius = distance in %
 foveal_radius = 0.1175
-transition_width = 0.0585
+transition_width = 0.1475
 
 #Gaze source: "tobii" (hardware) or "mouse" (fallback)
 gaze_source = "tobii"

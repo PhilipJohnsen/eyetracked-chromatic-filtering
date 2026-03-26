@@ -1,3 +1,0 @@
-{"event_type": "session_started", "timestamp_utc": "2026-03-25T11:32:40.710457Z", "payload": {"participant_id": "P001", "session_id": "S05", "participant_number": 1, "latin_variant_index": 0, "fallback_active": false, "fallback_reason": ""}}
-{"event_type": "eye_capture_windows_finalized", "timestamp_utc": "2026-03-25T11:32:43.907607Z", "payload": {"n_windows": 0, "n_windows_with_tracker_timestamps": 0, "tracker_connected": false}}
-{"event_type": "session_completed", "timestamp_utc": "2026-03-25T11:32:43.910608Z", "payload": {"status": "quit", "outcome_status_counts": {"pending_eyetracker_pipeline": 4, "pending": 5, "pending_surveyxact": 3}}}

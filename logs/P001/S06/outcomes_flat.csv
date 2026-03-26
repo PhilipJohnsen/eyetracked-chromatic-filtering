@@ -1,2 +1,0 @@
-participant_id,participant_number,session_id,session_started_utc,session_completed_utc,session_status,reading_comprehension_accuracy_pct,reading_time_sec,detectability_identification_accuracy_true_false,detectability_response_time_ms,detectability_dprime_none,detectability_dprime_full,detectability_dprime_eyetracked,nasa_tlx_overall_workload,eye_strain_symptom_total,blinks_count,saccades_count,saccades_duration_ms,fixations_count,fixations_length_ms
-P001,1,S06,2026-03-25T11:34:09.986837Z,2026-03-25T11:34:15.347637Z,quit,,,,,,,,,,0,0,0,0,0

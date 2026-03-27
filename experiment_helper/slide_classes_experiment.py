@@ -17,7 +17,7 @@ READING_WRAP_WIDTH = 88
 QUESTION_WRAP_WIDTH = 88
 OPTION_WRAP_WIDTH = 84
 SNIPPET_WRAP_WIDTH = 88
-DETECTABILITY_READING_TIME_S = 3.0
+DETECTABILITY_READING_TIME_S = 4.0
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,6 @@ INTRO_COPY = DarkInfoCopy(
     body=(
         "This experiment is about eye-tracked chromatic filtering.\n\n"
         "Press SPACE to continue.\n\n\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
 )
 
@@ -53,9 +52,8 @@ READING_COMPREHENSION_INTRO_COPY = DarkInfoCopy(
     title="Reading Comprehension",
     body=(
         "This is a practice task for reading comprehension. You will read a short paragagraph on screen. \n Read it at your normal pace. When you finish, press the spacebar. \n You will then answer 3 questions about what you read. \n Take your time.\n"
-        "\nLater in the experiment you will read 3 additional paragraphs with MCQs.\n\n"
+        "\nLater in the experiment you will read 3 additional paragraphs with questions afterwards.\n\n"
         "Press SPACE to continue.\n\n\n\n\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
 )
 
@@ -66,7 +64,6 @@ READING_TASK_REMINDER_COPY = DarkInfoCopy(
         "When you finish, press the spacebar. You will then answer 3 questions\n"
         "about what you read. Take your time.\n\n"
         "Press SPACE to continue.\n\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
 )
 
@@ -74,13 +71,14 @@ DETECTABILITY_ACK_COPY = DarkInfoCopy(
     title="Detectability",
     body=(
         "You will read short text snippets with different screen blur conditions.\n"
-        "Each snippet is shown for 3 seconds.\n"
+        "Each snippet is shown for 4 seconds.\n"
         "Afterward, you will answer what blur type you think was shown.\n\n"
-        "You will start with 6 practice tasks to get a feel for the task. Then you will complete 36 trials.\n\n"
+        "The experimenter will guide you through the 6 practice tasks, saying aloud what the filtering conditions are.\n\n"
+        "Next, you will do 36 more tasks on your own, without guidance. \n\n"
         "1 = No blur\n"
         "2 = Full blur\n"
         "3 = Eyetracked blur\n\n\n\n\n\n"
-        "Press SPACE to begin. Press CTRL+SHIFT+Q to quit."
+        "Press SPACE to begin when you are ready."
     ),
 )
 
@@ -105,13 +103,13 @@ THREE_MINUTE_BREAK_COPY = DarkInfoCopy(
 DETECTABILITY_TRANSITION_COPY = DarkInfoCopy(
     title="Detectability Trials",
     body=(
-        "You will now continue to the detectability trials.\n\n"
-        "A short text snippet will be displayed for 3 seconds.\n"
+        "You will now continue to the detectability tests.\n\n"
+        "A short text snippet will be displayed for 4 seconds.\n"
         "Please read the text and determine which filter is active.\n\n"
         "1 = No blur\n"
         "2 = Full blur\n"
         "3 = Eyetracked blur\n\n"
-        "Press SPACE to begin. Press CTRL+SHIFT+Q to quit."
+        "Press SPACE to begin."
     ),
 )
 
@@ -121,7 +119,6 @@ QUALITATIVE_QUESTIONS_COPY = DarkInfoCopy(
         "Please answer the qualitative questions from the experimenter.\n"
         "You can describe difficulty, comfort, and any blur-related observations.\n\n"
         "Press SPACE when finished.\n\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
 )
 
@@ -147,28 +144,24 @@ CALIBRATION_COPY = CalibrationCopy(
     setup=(
         "Calibration Setup\n\n"
         "Press SPACE to start eye-tracker calibration.\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
     tracker_missing=(
         "No Tobii tracker detected.\n\n"
         "Press SPACE to continue in development mode (skip calibration).\n"
-        "Press CTRL+SHIFT+Q to quit.\n\n"
         "When Tobii Pro Fusion is available, rerun calibration."
     ),
     progress_template=(
         "Calibrating... Point {index}/{total}\n"
         "Attempt {attempt}\n\n"
         "Keep your head still and look at the white dot.\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
     success=(
         "Calibration complete.\n\n"
         "Press SPACE to continue.\n"
-        "Press CTRL+SHIFT+Q to quit."
     ),
     failure=(
         "Calibration failed or was interrupted.\n\n"
-        "Press CTRL+SHIFT+Q to quit."
+        "Press SPACE to continue in development mode (skip calibration).\n"
     ),
 )
 

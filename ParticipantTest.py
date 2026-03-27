@@ -117,7 +117,7 @@ def _collect_content_load_errors() -> list[str]:
 # so the pre-trial gap is always identical regardless of blur condition.
 DETECTABILITY_PRE_TRIAL_PAUSE_S = 3.5  # Black screen before stimulus (allows renderer init)
 DETECTABILITY_POST_TRIAL_PAUSE_S = 0.2  # Black screen after stimulus
-DETECTABILITY_READING_TIME_S = 3.0  # Duration each stimulus text is displayed
+DETECTABILITY_READING_TIME_S = 4.0  # Duration each stimulus text is displayed
 
 #Eye movement event extraction
 #Generally taken from Kar's paper in IEEE
@@ -136,10 +136,12 @@ LATIN_FILTER_ORDERS = [list(p) for p in permutations(FILTER_CONDITIONS)]
 # Post-experiment questionnaire URLs (hosted on SurveyXact)
 QUESTIONNAIRE_URL_FULL = "https://www.survey-xact.dk/LinkCollector?key=NRCKWQCGJP95"  # Full questionnaire
 QUESTIONNAIRE_URL_EYES = "https://www.survey-xact.dk/LinkCollector?key=3MPW279ZLN9N"  # Eye-strain focused
+QUESTIONNAIRE_URL_DEMOGRAPHICS = "https://www.survey-xact.dk/LinkCollector?key=N453H41CU1CJ"  # Demographics survey
 QUESTIONNAIRE_TEXT = "Link to questionnaire"
 # Case variants for backwards compatibility
 questionnaire_url_full = QUESTIONNAIRE_URL_FULL
 questionnaire_url_eyes = QUESTIONNAIRE_URL_EYES
+questionnaire_url_demographics = QUESTIONNAIRE_URL_DEMOGRAPHICS
 # Outcome metrics collected during the experiment
 
 OUTCOME_KEYS = [
@@ -1777,58 +1779,70 @@ class ParticipantExperiment:
         # Declarative protocol steps keep ordering explicit while avoiding repetitive call boilerplate.
         protocol_steps: list[tuple[int, str, Callable[[], bool]]] = [
             (1, "intro", self.run_introduction_segment),
-            (2, "calibration", self.run_calibration_segment),
+            (
+                2,
+                "demographics survey",
+                self._make_questionnaire_action(
+                    step_number=2,
+                    title="Demographics",
+                    questionnaire_url=questionnaire_url_demographics,
+                ),
+            ),
             (3, "reading intro", self.run_reading_comprehension_intro_screen),
             (4, "practice paragraph", self.run_practice_reading_screen),
             (5, "practice MCQs", self.run_training_mcq_block),
-            (6, "reading paragraph 1", self._make_reading_paragraph_action(1)),
-            (7, "reading paragraph 1 MCQs", self._make_reading_mcq_action(1)),
+            (6, "calibration before reading paragraph 1", self.run_calibration_segment),
+            (7, "reading paragraph 1", self._make_reading_paragraph_action(1)),
+            (8, "reading paragraph 1 MCQs", self._make_reading_mcq_action(1)),
             (
-                8,
+                9,
                 "questionnaire after reading 1",
                 self._make_questionnaire_action(
-                    step_number=8,
+                    step_number=9,
                     title="NASA-TLX + Eye Strain (After Reading 1)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),
-            (9, "1-minute break", self._make_break_action(ONE_MINUTE_BREAK_COPY, duration_s=60)),
-            (10, "reading paragraph 2", self._make_reading_paragraph_action(2)),
-            (11, "reading paragraph 2 MCQs", self._make_reading_mcq_action(2)),
+            (10, "1-minute break", self._make_break_action(ONE_MINUTE_BREAK_COPY, duration_s=60)),
+            (11, "calibration before reading paragraph 2", self.run_calibration_segment),
+            (12, "reading paragraph 2", self._make_reading_paragraph_action(2)),
+            (13, "reading paragraph 2 MCQs", self._make_reading_mcq_action(2)),
             (
-                12,
+                14,
                 "questionnaire after reading 2",
                 self._make_questionnaire_action(
-                    step_number=12,
+                    step_number=14,
                     title="NASA-TLX + Eye Strain (After Reading 2)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),
-            (13, "1-minute break", self._make_break_action(ONE_MINUTE_BREAK_COPY, duration_s=60)),
-            (14, "reading paragraph 3", self._make_reading_paragraph_action(3)),
-            (15, "reading paragraph 3 MCQs", self._make_reading_mcq_action(3)),
+            (15, "1-minute break", self._make_break_action(ONE_MINUTE_BREAK_COPY, duration_s=60)),
+            (16, "calibration before reading paragraph 3", self.run_calibration_segment),
+            (17, "reading paragraph 3", self._make_reading_paragraph_action(3)),
+            (18, "reading paragraph 3 MCQs", self._make_reading_mcq_action(3)),
             (
-                16,
+                19,
                 "questionnaire after reading 3",
                 self._make_questionnaire_action(
-                    step_number=16,
+                    step_number=19,
                     title="NASA-TLX + Eye Strain (After Reading 3)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),
-            (17, "3-minute break", self._make_break_action(THREE_MINUTE_BREAK_COPY, duration_s=180)),
-            (18, "detectability intro", self.run_detectability_ack_screen),
+            (20, "3-minute break", self._make_break_action(THREE_MINUTE_BREAK_COPY, duration_s=180)),
+            (21, "detectability intro", self.run_detectability_ack_screen),
+            (22, "calibration before detectability practice", self.run_calibration_segment),
             (
-                19,
+                23,
                 "detectability practice 1-6",
                 self._make_detectability_phase_action(
                     phase="practice",
                     display_label="Detectability practice trials 1-6",
                 ),
             ),
-            (20, "detectability reminder before main trials", self.run_detectability_ack_screen),
+            (24, "detectability reminder before main trials", self.run_detectability_ack_screen),
             (
-                21,
+                25,
                 "detectability main trials 1-36",
                 self._make_detectability_phase_action(
                     phase="all_blocks",
@@ -1836,16 +1850,16 @@ class ParticipantExperiment:
                 ),
             ),
             (
-                22,
+                26,
                 "questionnaire after detectability",
                 self._make_questionnaire_action(
-                    step_number=22,
+                    step_number=26,
                     title="Eye Strain (After Detectability)",
                     questionnaire_url=questionnaire_url_eyes,
                 ),
             ),
-            (23, "study goals debrief", self.run_study_purpose_screen),
-            (24, "thank you", self.run_thank_you_screen),
+            (27, "study goals debrief", self.run_study_purpose_screen),
+            (28, "thank you", self.run_thank_you_screen),
         ]
 
         for step_number, end_label, action in protocol_steps:

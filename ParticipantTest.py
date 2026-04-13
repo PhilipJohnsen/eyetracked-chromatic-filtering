@@ -1286,7 +1286,7 @@ class ParticipantExperiment:
                     "Please wait for the experimenter to open\n"
                     "the calibration software.\n\n"
                     "Follow the instructions on the calibration screen.\n\n"
-                    "Press SPACE when calibration is complete."
+                    "Press the spacebar when calibration is complete."
                 ),
             )
         finally:
@@ -1311,7 +1311,7 @@ class ParticipantExperiment:
                 "You will answer multiple-choice questions next."
             ),
             body=TRAINING_TEXT,
-            footer="Press SPACE to continue to the questions. Press CTRL+SHIFT+Q to quit.",
+            footer="Press the spacebar to continue to the questions.",
         )
         elapsed = round(time.perf_counter() - started, 3)
         self._segment_end(segment, status="ok" if ok else "quit", metrics={"reading_time_sec": elapsed})
@@ -1344,7 +1344,7 @@ class ParticipantExperiment:
                 headline=f"{headline_prefix} {idx} of {len(items)}",
                 question=str(item["question"]),
                 options=[str(option) for option in item["options"]],
-                instruction="Answer using keys 1-4. Press CTRL+SHIFT+Q to quit.",
+                instruction="Select your answer using number keys 1 to 4.",
                 n_options=4,
             )
             if choice == "QUIT":
@@ -1451,10 +1451,10 @@ class ParticipantExperiment:
             ok = self._light_text.show(
                 header=(
                     f"Reading Comprehension Paragraph {paragraph_index}\n"
-                    "Read carefully. MCQs will follow."
+                    "Read carefully. Multiple-choice questions will follow."
                 ),
                 body=self._paragraph_text_for_file(paragraph_file),
-                footer="Press SPACE to continue to the questions. Press CTRL+SHIFT+Q to quit.",
+                footer="Press the spacebar to continue to the questions.",
             )
             elapsed = round(time.perf_counter() - started, 3)
             if ok:
@@ -1665,17 +1665,17 @@ class ParticipantExperiment:
 
         body = (
             "You are now being redirected to the questionnaire website.\n\n"
-            "Complete the questionnaire in your browser, then return here and press SPACE to continue.\n\n"
-            f"Survey link:\n{questionnaire_text}\n\n"
-            "Press CTRL+SHIFT+Q to quit."
+            "Complete the questionnaire in your browser.\n"
+            "When you are done, return to this window.\n\n"
+            "Press the spacebar when you have finished the questionnaire."
         )
 
         if not url_opened:
             body = (
                 "Automatic browser redirect could not be confirmed.\n\n"
-                "Please open the questionnaire link manually in a browser, complete it, and then return here.\n\n"
-                f"Survey link:\n{questionnaire_text}\n\n"
-                "Press SPACE when finished, or CTRL+SHIFT+Q to quit."
+                "If you need to stop the experiment, please tell the experimenter.\n"
+                "Once the questionnaire is open, complete it and return here.\n\n"
+                "Press the spacebar when finished."
             )
 
         ok = self._dark_info.show(
@@ -1799,7 +1799,7 @@ class ParticipantExperiment:
                 "questionnaire after reading 1",
                 self._make_questionnaire_action(
                     step_number=9,
-                    title="NASA-TLX + Eye Strain (After Reading 1)",
+                    title="Questionnaire (After Reading 1)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),
@@ -1812,7 +1812,7 @@ class ParticipantExperiment:
                 "questionnaire after reading 2",
                 self._make_questionnaire_action(
                     step_number=14,
-                    title="NASA-TLX + Eye Strain (After Reading 2)",
+                    title="Questionnaire (After Reading 2)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),
@@ -1825,7 +1825,7 @@ class ParticipantExperiment:
                 "questionnaire after reading 3",
                 self._make_questionnaire_action(
                     step_number=19,
-                    title="NASA-TLX + Eye Strain (After Reading 3)",
+                    title="Questionnaire (After Reading 3)",
                     questionnaire_url=questionnaire_url_full,
                 ),
             ),

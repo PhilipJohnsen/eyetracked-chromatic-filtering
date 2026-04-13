@@ -9,8 +9,8 @@ import tkinter.font as tkfont
 
 CONDITION_LABELS = {
     "none": "No blur",
-    "full": "Full blur",
-    "eyetracked": "Eyetracked blur",
+    "full": "Full-screen blur",
+    "eyetracked": "Eye-tracked blur",
 }
 
 READING_WRAP_WIDTH = 88
@@ -44,16 +44,19 @@ INTRO_COPY = DarkInfoCopy(
     title="Welcome",
     body=(
         "This experiment is about eye-tracked chromatic filtering.\n\n"
-        "Press SPACE to continue.\n\n\n"
+        "Press the spacebar to continue.\n\n\n"
     ),
 )
 
 READING_COMPREHENSION_INTRO_COPY = DarkInfoCopy(
     title="Reading Comprehension",
     body=(
-        "This is a practice task for reading comprehension. You will read a short paragagraph on screen. \n Read it at your normal pace. When you finish, press the spacebar. \n You will then answer 3 questions about what you read. \n Take your time.\n"
+        "This is a practice task for reading comprehension.\n"
+        "You will read a short paragraph on screen.\n"
+        "Read at your normal pace. When you finish, press the spacebar.\n"
+        "You will then answer 3 questions about what you read. Take your time.\n"
         "\nLater in the experiment you will read 3 additional paragraphs with questions afterwards.\n\n"
-        "Press SPACE to continue.\n\n\n\n\n"
+        "Press the spacebar to continue.\n\n\n\n\n"
     ),
 )
 
@@ -63,22 +66,23 @@ READING_TASK_REMINDER_COPY = DarkInfoCopy(
         "You will read a short paragraph on screen. Read it at your normal pace.\n"
         "When you finish, press the spacebar. You will then answer 3 questions\n"
         "about what you read. Take your time.\n\n"
-        "Press SPACE to continue.\n\n"
+        "Press the spacebar to continue.\n\n"
     ),
 )
 
 DETECTABILITY_ACK_COPY = DarkInfoCopy(
-    title="Detectability",
+    title="Blur Identification Task",
     body=(
-        "You will read short text snippets with different screen blur conditions.\n"
+        "\nYou will read short text snippets with different screen blur conditions.\n"
         "Each snippet is shown for 4 seconds.\n"
-        "Afterward, you will answer what blur type you think was shown.\n\n"
-        "The experimenter will guide you through the 6 practice tasks, saying aloud what the filtering conditions are.\n\n"
-        "Next, you will do 36 more tasks on your own, without guidance. \n\n"
+        "After each snippet, choose which blur type you think was shown.\n\n"
+        "The experimenter will guide you through the 6 practice tasks by saying aloud\n "
+        "which condition is shown.\n\n"
+        "Next, you will do 36 more tasks on your own, without guidance.\n\n"
         "1 = No blur\n"
-        "2 = Full blur\n"
-        "3 = Eyetracked blur\n\n\n\n\n\n"
-        "Press SPACE to begin when you are ready."
+        "2 = Full-screen blur\n"
+        "3 = Eye-tracked blur\n\n\n"
+        "Press the spacebar to begin when you are ready."
     ),
 )
 
@@ -101,24 +105,24 @@ THREE_MINUTE_BREAK_COPY = DarkInfoCopy(
 )
 
 DETECTABILITY_TRANSITION_COPY = DarkInfoCopy(
-    title="Detectability Trials",
+    title="Blur Identification Trials",
     body=(
-        "You will now continue to the detectability tests.\n\n"
+        "You will now continue to the blur identification trials.\n\n"
         "A short text snippet will be displayed for 4 seconds.\n"
-        "Please read the text and determine which filter is active.\n\n"
+        "Please read the text and determine which blur condition is active.\n\n"
         "1 = No blur\n"
-        "2 = Full blur\n"
-        "3 = Eyetracked blur\n\n"
-        "Press SPACE to begin."
+        "2 = Full-screen blur\n"
+        "3 = Eye-tracked blur\n\n"
+        "Press the spacebar to begin."
     ),
 )
 
 QUALITATIVE_QUESTIONS_COPY = DarkInfoCopy(
-    title="Qualitative Questions",
+    title="Final Questions",
     body=(
         "Please answer the qualitative questions from the experimenter.\n"
         "You can describe difficulty, comfort, and any blur-related observations.\n\n"
-        "Press SPACE when finished.\n\n"
+        "Press the spacebar when finished.\n\n"
     ),
 )
 
@@ -126,7 +130,7 @@ THANK_YOU_COPY = DarkInfoCopy(
     title="Thank You",
     body=(
         "Thank you for participating.\n\n"
-        "Press SPACE to continue."
+        "Press the spacebar to continue."
     ),
 )
 
@@ -135,7 +139,7 @@ STUDY_PURPOSE_COPY = DarkInfoCopy(
     body=(
         "This study investigates eye-tracked chromatic filtering and how it influences\n"
         "reading comprehension and blur detectability during text-based tasks.\n\n"
-        "Press SPACE to finish."
+        "Press the spacebar to finish."
     ),
 )
 
@@ -143,12 +147,12 @@ CALIBRATION_COPY = CalibrationCopy(
     title="Calibration",
     setup=(
         "Calibration Setup\n\n"
-        "Press SPACE to start eye-tracker calibration.\n"
+        "Press the spacebar to start eye-tracker calibration.\n"
     ),
     tracker_missing=(
-        "No Tobii tracker detected.\n\n"
-        "Press SPACE to continue in development mode (skip calibration).\n"
-        "When Tobii Pro Fusion is available, rerun calibration."
+        "No eye tracker was detected.\n\n"
+        "Press the spacebar to continue in test mode (without calibration).\n"
+        "When the eye tracker is available, calibration can be run again."
     ),
     progress_template=(
         "Calibrating... Point {index}/{total}\n"
@@ -157,11 +161,11 @@ CALIBRATION_COPY = CalibrationCopy(
     ),
     success=(
         "Calibration complete.\n\n"
-        "Press SPACE to continue.\n"
+        "Press the spacebar to continue.\n"
     ),
     failure=(
         "Calibration failed or was interrupted.\n\n"
-        "Press SPACE to continue in development mode (skip calibration).\n"
+        "Press the spacebar to continue in test mode (without calibration).\n"
     ),
 )
 
@@ -172,6 +176,15 @@ class BaseScreen:
     def __init__(self, experiment: object) -> None:
         self._exp = experiment
         self.root = experiment.root  # type: ignore[attr-defined]
+
+    def _font(self, size: int, weight: str | None = None) -> tuple[str, int] | tuple[str, int, str]:
+        if weight is None:
+            return ("Verdana", size)
+        return ("Verdana", size, weight)
+
+    def _wraplength(self, relwidth: float, *, horizontal_padding: int, reserve: int = 24) -> int:
+        panel_px = int(self.root.winfo_screenwidth() * relwidth)
+        return max(240, panel_px - (horizontal_padding * 2) - reserve)
 
     def _build_dark_panel(self, relwidth: float = 0.68, relheight: float = 0.62) -> tk.Frame:
         container = self._exp._show_frame("#0B0F14")
@@ -203,7 +216,7 @@ class BaseScreen:
             text=text,
             fg="#0A3558",
             bg="#DDEFFC",
-            font=("Verdana", 12, "bold"),
+            font=self._font(12, "bold"),
             justify=tk.LEFT,
             anchor="w",
             padx=14,
@@ -215,15 +228,17 @@ class DarkInfoScreen(BaseScreen):
     def show(self, title: str, body: str, relwidth: float = 0.68, relheight: float = 0.62) -> bool:
         panel = self._build_light_panel(relwidth=relwidth, relheight=relheight)
         self._add_section_banner(panel, "INFORMATION")
+        content_wrap = self._wraplength(relwidth, horizontal_padding=54)
 
         tk.Label(
             panel,
             text=title,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 32, "bold"),
+            font=self._font(32, "bold"),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=54, pady=(0, 20))
 
         tk.Label(
@@ -231,9 +246,10 @@ class DarkInfoScreen(BaseScreen):
             text=body,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 18),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=54, pady=(0, 56))
 
         return self._exp._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
@@ -242,21 +258,24 @@ class DarkInfoScreen(BaseScreen):
 class LightTextScreen(BaseScreen):
     def show(self, header: str, body: str, footer: str, relwidth: float = 0.62, relheight: float = 0.80) -> bool:
         panel = self._build_light_panel(relwidth=relwidth, relheight=relheight)
+        content_wrap = self._wraplength(relwidth, horizontal_padding=72)
+        reading_font = self._font(14)
 
         tk.Label(
             panel,
             text=header,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 14, "bold"),
+            font=self._font(14, "bold"),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=72, pady=(34, 20))
 
         text_widget = tk.Text(
             panel,
             wrap=tk.WORD,
-            font=("Verdana", 14),
+            font=reading_font,
             bg="#FAFAFA",
             fg="black",
             relief=tk.FLAT,
@@ -268,7 +287,7 @@ class LightTextScreen(BaseScreen):
         text_widget.pack(fill=tk.BOTH, expand=True, padx=72)
         text_widget.insert("1.0", textwrap.fill(body, width=READING_WRAP_WIDTH))
         text_widget.tag_add("body", "1.0", "end")
-        body_font = tkfont.Font(font=("Verdana", 14))
+        body_font = tkfont.Font(font=reading_font)
         line_px = max(1, int(body_font.metrics("linespace")))
         text_widget.tag_configure(
             "body",
@@ -286,9 +305,10 @@ class LightTextScreen(BaseScreen):
             text=footer,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 12),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=72, pady=(20, 34))
 
         return self._exp._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"
@@ -296,16 +316,19 @@ class LightTextScreen(BaseScreen):
 
 class MCQScreen(BaseScreen):
     def show(self, headline: str, question: str, options: list[str], instruction: str, n_options: int = 4) -> str:
-        panel = self._build_light_panel(relwidth=0.72, relheight=0.74)
+        relwidth = 0.72
+        panel = self._build_light_panel(relwidth=relwidth, relheight=0.74)
+        content_wrap = self._wraplength(relwidth, horizontal_padding=64)
 
         tk.Label(
             panel,
             text=headline,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 16, "bold"),
+            font=self._font(16, "bold"),
             anchor="w",
             justify=tk.LEFT,
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(34, 20))
 
         tk.Label(
@@ -313,9 +336,10 @@ class MCQScreen(BaseScreen):
             text=textwrap.fill(question, width=QUESTION_WRAP_WIDTH),
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 14),
+            font=self._font(14),
             anchor="w",
             justify=tk.LEFT,
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(0, 24))
 
         options_row = tk.Frame(panel, bg="#FAFAFA")
@@ -340,7 +364,7 @@ class MCQScreen(BaseScreen):
                 text=f"[{opt_idx}]",
                 fg="#0A3558",
                 bg="#DDEFFC",
-                font=("Verdana", 18, "bold"),
+                font=self._font(18, "bold"),
                 padx=14,
                 pady=8,
             ).pack(pady=(12, 10))
@@ -350,7 +374,7 @@ class MCQScreen(BaseScreen):
                 text=textwrap.fill(opt_text, width=18),
                 fg="black",
                 bg="#FAFAFA",
-                font=("Verdana", 12),
+                font=self._font(14),
                 justify=tk.CENTER,
                 anchor="n",
             ).pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 12))
@@ -360,9 +384,10 @@ class MCQScreen(BaseScreen):
             text=instruction,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 12),
+            font=self._font(14),
             anchor="w",
             justify=tk.LEFT,
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(24, 34))
 
         key_map = {str(i): str(i) for i in range(1, n_options + 1)}
@@ -372,16 +397,19 @@ class MCQScreen(BaseScreen):
 class DetectabilityTextScreen(BaseScreen):
     def show(self, snippet: str, idx: int, total: int, duration_s: float = DETECTABILITY_READING_TIME_S) -> bool:
         self.root.attributes("-topmost", False)
-        panel = self._build_light_panel(relwidth=0.56, relheight=0.58)
+        relwidth = 0.56
+        panel = self._build_light_panel(relwidth=relwidth, relheight=0.58)
+        content_wrap = self._wraplength(relwidth, horizontal_padding=64)
 
         tk.Label(
             panel,
-            text=f"Detectability Trial {idx} of {total}",
+            text=f"Blur Identification Trial {idx} of {total}",
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 16, "bold"),
+            font=self._font(16, "bold"),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(30, 24))
 
         tk.Label(
@@ -389,9 +417,10 @@ class DetectabilityTextScreen(BaseScreen):
             text=textwrap.fill(snippet, width=SNIPPET_WRAP_WIDTH),
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 14),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(0, 30))
 
         tk.Label(
@@ -399,7 +428,7 @@ class DetectabilityTextScreen(BaseScreen):
             text="",
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 12),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
         ).pack(fill=tk.X, padx=64, pady=(0, 30))
@@ -410,16 +439,19 @@ class DetectabilityTextScreen(BaseScreen):
 class DetectabilityResponseScreen(BaseScreen):
     def show(self, idx: int, total: int) -> str:
         self.root.attributes("-topmost", True)
-        panel = self._build_light_panel(relwidth=0.56, relheight=0.64)
+        relwidth = 0.56
+        panel = self._build_light_panel(relwidth=relwidth, relheight=0.64)
+        content_wrap = self._wraplength(relwidth, horizontal_padding=64)
 
         tk.Label(
             panel,
-            text=f"Detectability Response {idx} of {total}",
+            text=f"Blur Response {idx} of {total}",
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 16, "bold"),
+            font=self._font(16, "bold"),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(30, 12))
 
         tk.Label(
@@ -427,9 +459,10 @@ class DetectabilityResponseScreen(BaseScreen):
             text="What blur did you perceive in the previous text?",
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 13),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(0, 24))
 
         options_row = tk.Frame(panel, bg="#FAFAFA")
@@ -440,8 +473,8 @@ class DetectabilityResponseScreen(BaseScreen):
 
         for key, label, sublabel in [
             ("1", "[1]", "No blur"),
-            ("2", "[2]", "Full blur"),
-            ("3", "[3]", "Eyetracked blur"),
+            ("2", "[2]", "Full-screen blur"),
+            ("3", "[3]", "Eye-tracked blur"),
         ]:
             card = tk.Frame(
                 options_row,
@@ -457,7 +490,7 @@ class DetectabilityResponseScreen(BaseScreen):
                 text=label,
                 fg="#0A3558",
                 bg="#DDEFFC",
-                font=("Verdana", 22, "bold"),
+                font=self._font(22, "bold"),
                 padx=14,
                 pady=10,
             ).pack(pady=(16, 8))
@@ -467,19 +500,20 @@ class DetectabilityResponseScreen(BaseScreen):
                 text=sublabel,
                 fg="black",
                 bg="#FAFAFA",
-                font=("Verdana", 13),
+                font=self._font(14),
                 justify=tk.CENTER,
                 anchor="n",
             ).pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 16))
 
         tk.Label(
             panel,
-            text="Press CTRL+SHIFT+Q to quit.",
+            text="If you need to stop, please tell the experimenter.",
             fg="#888888",
             bg="#FAFAFA",
-            font=("Verdana", 10),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=64, pady=(28, 20))
 
         return self._exp._wait_for_keys({"1": "1", "2": "2", "3": "3"})
@@ -487,17 +521,20 @@ class DetectabilityResponseScreen(BaseScreen):
 
 class TimedBreakScreen(BaseScreen):
     def show(self, copy: DarkInfoCopy, duration_s: int) -> bool:
-        panel = self._build_light_panel(relwidth=0.68, relheight=0.64)
+        relwidth = 0.68
+        panel = self._build_light_panel(relwidth=relwidth, relheight=0.64)
         self._add_section_banner(panel, "BREAK")
+        content_wrap = self._wraplength(relwidth, horizontal_padding=54)
 
         tk.Label(
             panel,
             text=copy.title,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 30, "bold"),
+            font=self._font(30, "bold"),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=54, pady=(0, 20))
 
         tk.Label(
@@ -505,9 +542,10 @@ class TimedBreakScreen(BaseScreen):
             text=copy.body,
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 16),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=54, pady=(0, 24))
 
         timer_label = tk.Label(
@@ -515,7 +553,7 @@ class TimedBreakScreen(BaseScreen):
             text="",
             fg="#0A3558",
             bg="#DDEFFC",
-            font=("Verdana", 20, "bold"),
+            font=self._font(20, "bold"),
             justify=tk.LEFT,
             anchor="w",
             padx=14,
@@ -550,12 +588,13 @@ class TimedBreakScreen(BaseScreen):
         timer_label.config(text="Break complete.")
         tk.Label(
             panel,
-            text="Press SPACE to continue.",
+            text="Press the spacebar to continue.",
             fg="black",
             bg="#FAFAFA",
-            font=("Verdana", 14),
+            font=self._font(14),
             justify=tk.LEFT,
             anchor="w",
+            wraplength=content_wrap,
         ).pack(fill=tk.X, padx=54, pady=(0, 34))
 
         return self._exp._wait_for_keys({"<space>": "CONTINUE"}) == "CONTINUE"

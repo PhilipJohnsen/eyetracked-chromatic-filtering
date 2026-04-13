@@ -21,8 +21,8 @@ shader_path = "shader/blur.glsl"
 #Or transitional towards the periphery that is blurred
     #Calculated from gaze center to full blur is:
     #foveal_radius+transition_radius = distance in %
-foveal_radius = 0.1175
-transition_width = 0.1475
+foveal_radius = 0.0879
+transition_width = 0.0879
 
 #Gaze source: "tobii" (hardware) or "mouse" (fallback)
 gaze_source = "tobii"
@@ -40,9 +40,7 @@ log_gaze = False
 log_path = "gaze_log.csv"
 
 # Luminance correction for peripheral blur yellowing [0.0, 1.0].
-# The heavy blue-channel blur spreads blue away from bright pixels, making white
-# text appear yellow in the periphery.  This rescales the blurred pixel's colour
-# to match the original pixel's Rec.709 luminance, smoothing out the yellow cast
-# while preserving the chromatic fringe direction at high-contrast edges.
 # 0.0 = no correction (full yellow cast),  1.0 = fully luminance-preserving.
 lum_correction = 0.0
+#Kept OFF for now, as it casts very visible yellowing visual artifacts without improving readability or usability
+#Thus keeping it OFF does not preserve luminance completely, but keeps colour channels from oversaturating beyond defensible levels

@@ -1840,7 +1840,7 @@ class ParticipantExperiment:
                     display_label="Detectability practice trials 1-6",
                 ),
             ),
-            (24, "detectability reminder before main trials", self.run_detectability_ack_screen),
+            (24, "detectability reminder before main trials", self.run_detectability_transition_screen),
             (
                 25,
                 "detectability main trials 1-36",

@@ -30,6 +30,8 @@ class SessionPaths:
     eye_events_log_path: Path
     eye_windows_log_path: Path
     outcomes_flat_log_path: Path
+    detectability_trials_log_path: Path
+    detectability_summary_log_path: Path
 
 
 @dataclass
@@ -113,6 +115,8 @@ class SessionLogger:
             eye_events_log_path=session_dir / "eye_events.csv",
             eye_windows_log_path=session_dir / "eye_windows.csv",
             outcomes_flat_log_path=session_dir / "outcomes_flat.csv",
+            detectability_trials_log_path=session_dir / "detectability_trials.csv",
+            detectability_summary_log_path=session_dir / "detectability_summary.csv",
         )
         self._ensure_segments_header()
         return self.paths
@@ -237,6 +241,8 @@ class SessionLogger:
                 "eye_events_path": str(self.paths.eye_events_log_path),
                 "eye_windows_path": str(self.paths.eye_windows_log_path),
                 "outcomes_flat_path": str(self.paths.outcomes_flat_log_path),
+                "detectability_trials_path": str(self.paths.detectability_trials_log_path),
+                "detectability_summary_path": str(self.paths.detectability_summary_log_path),
             },
             "schedule": {
                 "latin_variant_index": self.latin_variant_index,

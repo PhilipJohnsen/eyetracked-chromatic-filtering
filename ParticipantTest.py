@@ -254,6 +254,7 @@ class ParticipantExperiment:
         self._reading_mcq_summary_by_index: dict[int, dict[str, object]] = {}
         self._detectability_trial_records: list[dict[str, object]] = []
         self._eye_movement_window_summaries: list[dict[str, object]] = []
+        self._eye_movement_summarized_labels: set[str] = set()
         self._eye_capture_windows: list[dict[str, object]] = []
         self._active_eye_window_starts: dict[str, dict[str, object]] = {}
         self._session_eyetracker: TobiiGazeTracker | None = None
@@ -632,6 +633,25 @@ class ParticipantExperiment:
         window.pop("start_perf_counter", None)
         self._eye_capture_windows.append(window)
 
+        # Summarize each window immediately so early-session windows are not lost
+        # when the in-memory gaze ring buffer rolls over before finalization.
+        tracker = self._session_eyetracker
+        if tracker is None or not has_tracker_timestamps:
+            return
+        if label in self._eye_movement_summarized_labels:
+            return
+
+        summaries = tracker.summarize_eye_movement_windows(
+            [window],
+            velocity_threshold_ndc_per_s=EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S,
+            min_fixation_ms=EYE_EVENT_MIN_FIXATION_MS,
+            min_saccade_ms=EYE_EVENT_MIN_SACCADE_MS,
+            max_saccade_ms=EYE_EVENT_MAX_SACCADE_MS,
+            min_blink_ms=EYE_EVENT_MIN_BLINK_MS,
+            max_inter_sample_gap_s=EYE_EVENT_MAX_INTER_SAMPLE_GAP_S,
+        )
+        self._merge_eye_movement_window_summaries(summaries)
+
     def _finalize_eye_capture_windows(self) -> None:
         """Process eye capture windows: match with tracked eye data, close any unclosed."""
         if self._active_eye_window_starts:
@@ -674,8 +694,16 @@ class ParticipantExperiment:
         if tracker is None or not windows_with_timestamps:
             return
 
+        pending_windows = [
+            window
+            for window in windows_with_timestamps
+            if str(window.get("label", "")) not in self._eye_movement_summarized_labels
+        ]
+        if not pending_windows:
+            return
+
         summaries = tracker.summarize_eye_movement_windows(
-            windows_with_timestamps,
+            pending_windows,
             velocity_threshold_ndc_per_s=EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S,
             min_fixation_ms=EYE_EVENT_MIN_FIXATION_MS,
             min_saccade_ms=EYE_EVENT_MIN_SACCADE_MS,
@@ -683,8 +711,7 @@ class ParticipantExperiment:
             min_blink_ms=EYE_EVENT_MIN_BLINK_MS,
             max_inter_sample_gap_s=EYE_EVENT_MAX_INTER_SAMPLE_GAP_S,
         )
-        if summaries:
-            self.attach_eye_movement_window_summaries(summaries)
+        self._merge_eye_movement_window_summaries(summaries)
 
     def _write_eye_windows_csv(self) -> None:
         """Write eye capture windows to CSV (timestamps and linkage to segments)."""
@@ -1058,6 +1085,32 @@ class ParticipantExperiment:
         """Attach eye movement analysis summaries (blinks, saccades, fixations) from pipeline."""
         self._session_logger.attach_eye_movement_window_summaries(summaries)
         self._eye_movement_window_summaries = self._session_logger.eye_movement_window_summaries
+        self._eye_movement_summarized_labels = {
+            str(window.get("label", ""))
+            for window in self._eye_movement_window_summaries
+            if isinstance(window, dict)
+        }
+
+    def _merge_eye_movement_window_summaries(self, summaries: list[dict[str, object]]) -> None:
+        """Merge newly computed summaries without dropping previously captured windows."""
+        if not summaries:
+            return
+
+        incoming: list[dict[str, object]] = []
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            label = str(summary.get("label", ""))
+            if label and label in self._eye_movement_summarized_labels:
+                continue
+            incoming.append(summary)
+
+        if not incoming:
+            return
+
+        combined = list(self._eye_movement_window_summaries)
+        combined.extend(incoming)
+        self.attach_eye_movement_window_summaries(combined)
 
     def _finalize_eye_movement_outcomes(self) -> None:
         """Extract eye movement metrics from summaries and populate outcomes."""

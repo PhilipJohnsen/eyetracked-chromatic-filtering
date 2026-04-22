@@ -20,9 +20,9 @@ shader_path = "shader/blur.glsl"
 #Radius of screen in percent, that is fully clear (foveal center)
 #Or transitional towards the periphery that is blurred
     #Calculated from gaze center to full blur is:
-    #foveal_radius+transition_radius = distance in %
+    #foveal_radius+transition_radius = distance in % of the screens pixel width (circular in height)
 foveal_radius = 0.0879
-transition_width = 0.0879
+transition_width = 0.14
 
 #Gaze source: "tobii" (hardware) or "mouse" (fallback)
 gaze_source = "tobii"

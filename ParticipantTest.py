@@ -239,6 +239,8 @@ class ParticipantExperiment:
         self.eye_events_log_path: Path | None = None
         self.eye_windows_log_path: Path | None = None
         self.outcomes_flat_log_path: Path | None = None
+        self.detectability_trials_log_path: Path | None = None
+        self.detectability_summary_log_path: Path | None = None
         self._log_fallback_active = False
         self._log_fallback_reason = ""
             # In-memory event buffers (used if file writes fail)
@@ -252,6 +254,7 @@ class ParticipantExperiment:
         self._reading_mcq_summary_by_index: dict[int, dict[str, object]] = {}
         self._detectability_trial_records: list[dict[str, object]] = []
         self._eye_movement_window_summaries: list[dict[str, object]] = []
+        self._eye_movement_summarized_labels: set[str] = set()
         self._eye_capture_windows: list[dict[str, object]] = []
         self._active_eye_window_starts: dict[str, dict[str, object]] = {}
         self._session_eyetracker: TobiiGazeTracker | None = None
@@ -513,6 +516,8 @@ class ParticipantExperiment:
         self.eye_events_log_path = paths.eye_events_log_path
         self.eye_windows_log_path = paths.eye_windows_log_path
         self.outcomes_flat_log_path = paths.outcomes_flat_log_path
+        self.detectability_trials_log_path = paths.detectability_trials_log_path
+        self.detectability_summary_log_path = paths.detectability_summary_log_path
         self._log_fallback_active = self._session_logger.state.fallback_active
         self._log_fallback_reason = self._session_logger.state.fallback_reason
 
@@ -628,6 +633,25 @@ class ParticipantExperiment:
         window.pop("start_perf_counter", None)
         self._eye_capture_windows.append(window)
 
+        # Summarize each window immediately so early-session windows are not lost
+        # when the in-memory gaze ring buffer rolls over before finalization.
+        tracker = self._session_eyetracker
+        if tracker is None or not has_tracker_timestamps:
+            return
+        if label in self._eye_movement_summarized_labels:
+            return
+
+        summaries = tracker.summarize_eye_movement_windows(
+            [window],
+            velocity_threshold_ndc_per_s=EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S,
+            min_fixation_ms=EYE_EVENT_MIN_FIXATION_MS,
+            min_saccade_ms=EYE_EVENT_MIN_SACCADE_MS,
+            max_saccade_ms=EYE_EVENT_MAX_SACCADE_MS,
+            min_blink_ms=EYE_EVENT_MIN_BLINK_MS,
+            max_inter_sample_gap_s=EYE_EVENT_MAX_INTER_SAMPLE_GAP_S,
+        )
+        self._merge_eye_movement_window_summaries(summaries)
+
     def _finalize_eye_capture_windows(self) -> None:
         """Process eye capture windows: match with tracked eye data, close any unclosed."""
         if self._active_eye_window_starts:
@@ -670,8 +694,16 @@ class ParticipantExperiment:
         if tracker is None or not windows_with_timestamps:
             return
 
+        pending_windows = [
+            window
+            for window in windows_with_timestamps
+            if str(window.get("label", "")) not in self._eye_movement_summarized_labels
+        ]
+        if not pending_windows:
+            return
+
         summaries = tracker.summarize_eye_movement_windows(
-            windows_with_timestamps,
+            pending_windows,
             velocity_threshold_ndc_per_s=EYE_EVENT_VELOCITY_THRESHOLD_NDC_PER_S,
             min_fixation_ms=EYE_EVENT_MIN_FIXATION_MS,
             min_saccade_ms=EYE_EVENT_MIN_SACCADE_MS,
@@ -679,8 +711,7 @@ class ParticipantExperiment:
             min_blink_ms=EYE_EVENT_MIN_BLINK_MS,
             max_inter_sample_gap_s=EYE_EVENT_MAX_INTER_SAMPLE_GAP_S,
         )
-        if summaries:
-            self.attach_eye_movement_window_summaries(summaries)
+        self._merge_eye_movement_window_summaries(summaries)
 
     def _write_eye_windows_csv(self) -> None:
         """Write eye capture windows to CSV (timestamps and linkage to segments)."""
@@ -834,6 +865,113 @@ class ParticipantExperiment:
             self._log_fallback_active = True
             self._log_fallback_reason = f"outcomes flat write failed: {e}"
 
+    def _write_detectability_trials_csv(self) -> None:
+        """Write one row per detectability trial for downstream analysis."""
+        if self.detectability_trials_log_path is None:
+            return
+
+        fieldnames = [
+            "participant_id",
+            "participant_number",
+            "session_id",
+            "phase",
+            "is_main_block",
+            "trial_index",
+            "trial_file",
+            "condition",
+            "selected_key",
+            "selected_condition",
+            "is_correct",
+            "rt_ms",
+        ]
+
+        rows: list[dict[str, object]] = []
+        for trial in self._detectability_trial_records:
+            if not isinstance(trial, dict):
+                continue
+            phase = str(trial.get("phase", ""))
+            rows.append(
+                {
+                    "participant_id": self.participant_id,
+                    "participant_number": self.participant_number,
+                    "session_id": self.session_id,
+                    "phase": phase,
+                    "is_main_block": phase == "all_blocks" or phase.startswith("block"),
+                    "trial_index": int(trial.get("trial_index", 0) or 0),
+                    "trial_file": str(trial.get("trial_file", "")),
+                    "condition": str(trial.get("condition", "")),
+                    "selected_key": int(trial.get("selected_key", 0) or 0),
+                    "selected_condition": str(trial.get("selected_condition", "")),
+                    "is_correct": bool(trial.get("is_correct", False)),
+                    "rt_ms": int(trial.get("rt_ms", 0) or 0),
+                }
+            )
+
+        try:
+            with self.detectability_trials_log_path.open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                writer.writeheader()
+                if rows:
+                    writer.writerows(rows)
+        except OSError as e:
+            self._log_fallback_active = True
+            self._log_fallback_reason = f"detectability trials write failed: {e}"
+
+    def _write_detectability_summary_csv(self) -> None:
+        """Write summary rows for detectability by phase and by condition."""
+        if self.detectability_summary_log_path is None:
+            return
+
+        fieldnames = [
+            "participant_id",
+            "participant_number",
+            "session_id",
+            "group_type",
+            "group_value",
+            "n_trials",
+            "n_correct",
+            "accuracy_pct",
+            "mean_rt_ms",
+        ]
+
+        grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+        for trial in self._detectability_trial_records:
+            if not isinstance(trial, dict):
+                continue
+            phase = str(trial.get("phase", ""))
+            condition = str(trial.get("condition", ""))
+            grouped.setdefault(("phase", phase), []).append(trial)
+            grouped.setdefault(("condition", condition), []).append(trial)
+
+        rows: list[dict[str, object]] = []
+        for (group_type, group_value), records in sorted(grouped.items()):
+            n_trials = len(records)
+            n_correct = sum(1 for r in records if bool(r.get("is_correct", False)))
+            rt_values = [int(r.get("rt_ms", 0) or 0) for r in records if int(r.get("rt_ms", 0) or 0) > 0]
+            rows.append(
+                {
+                    "participant_id": self.participant_id,
+                    "participant_number": self.participant_number,
+                    "session_id": self.session_id,
+                    "group_type": group_type,
+                    "group_value": group_value,
+                    "n_trials": n_trials,
+                    "n_correct": n_correct,
+                    "accuracy_pct": round((100.0 * n_correct / n_trials), 3) if n_trials else None,
+                    "mean_rt_ms": round(sum(rt_values) / len(rt_values), 3) if rt_values else None,
+                }
+            )
+
+        try:
+            with self.detectability_summary_log_path.open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                writer.writeheader()
+                if rows:
+                    writer.writerows(rows)
+        except OSError as e:
+            self._log_fallback_active = True
+            self._log_fallback_reason = f"detectability summary write failed: {e}"
+
     def _write_eye_events_csv(self) -> None:
         """Write eye events from tracker (gaze points, blinks, saccades, fixations)."""
         if self.eye_events_log_path is None:
@@ -935,7 +1073,8 @@ class ParticipantExperiment:
         """
         analyzed_detectability_records = [
             r for r in self._detectability_trial_records
-            if str(r.get("phase", "")).startswith("block")
+            if str(r.get("phase", "")) == "all_blocks"
+            or str(r.get("phase", "")).startswith("block")
         ]
         return self._session_logger.compute_detectability_dprime(
             filter_conditions=FILTER_CONDITIONS,
@@ -946,6 +1085,32 @@ class ParticipantExperiment:
         """Attach eye movement analysis summaries (blinks, saccades, fixations) from pipeline."""
         self._session_logger.attach_eye_movement_window_summaries(summaries)
         self._eye_movement_window_summaries = self._session_logger.eye_movement_window_summaries
+        self._eye_movement_summarized_labels = {
+            str(window.get("label", ""))
+            for window in self._eye_movement_window_summaries
+            if isinstance(window, dict)
+        }
+
+    def _merge_eye_movement_window_summaries(self, summaries: list[dict[str, object]]) -> None:
+        """Merge newly computed summaries without dropping previously captured windows."""
+        if not summaries:
+            return
+
+        incoming: list[dict[str, object]] = []
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            label = str(summary.get("label", ""))
+            if label and label in self._eye_movement_summarized_labels:
+                continue
+            incoming.append(summary)
+
+        if not incoming:
+            return
+
+        combined = list(self._eye_movement_window_summaries)
+        combined.extend(incoming)
+        self.attach_eye_movement_window_summaries(combined)
 
     def _finalize_eye_movement_outcomes(self) -> None:
         """Extract eye movement metrics from summaries and populate outcomes."""
@@ -987,7 +1152,8 @@ class ParticipantExperiment:
 
         analyzed_detectability_records = [
             r for r in self._detectability_trial_records
-            if str(r.get("phase", "")).startswith("block")
+            if str(r.get("phase", "")) == "all_blocks"
+            or str(r.get("phase", "")).startswith("block")
         ]
 
         if analyzed_detectability_records:
@@ -1033,6 +1199,8 @@ class ParticipantExperiment:
         self._write_eye_windows_csv()
         self._write_eye_events_csv()
         self._write_outcomes_flat_csv()
+        self._write_detectability_trials_csv()
+        self._write_detectability_summary_csv()
         self._session_logger.outcomes = self.outcomes
         self._session_logger.finalize(
             quit_requested=self.quit_requested,

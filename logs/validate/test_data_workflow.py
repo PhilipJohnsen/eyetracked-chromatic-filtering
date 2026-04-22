@@ -16,6 +16,7 @@ Checks:
 Usage:
     python logs/validate/test_data_workflow.py
     python logs/validate/test_data_workflow.py --participant P001
+    python logs/validate/test_data_workflow.py --participant P001 --session S02
     python logs/validate/test_data_workflow.py --all
 """
 
@@ -49,22 +50,55 @@ def _safe_number(value: Any) -> float | None:
 class DataPresenceChecker:
     """Check that required analysis values exist and are non-zero where expected."""
 
-    def __init__(self, logs_dir: Path, session_id: str = "S01") -> None:
+    def __init__(self, logs_dir: Path, session_id: str = "auto") -> None:
         self.logs_dir = Path(logs_dir)
         self.session_id = session_id
 
-    def _manifest_path(self, participant_id: str) -> Path:
-        return self.logs_dir / participant_id / self.session_id / "session_manifest.json"
+    def _manifest_path(self, participant_id: str, session_id: str) -> Path:
+        return self.logs_dir / participant_id / session_id / "session_manifest.json"
 
-    def _load_manifest(self, participant_id: str) -> dict[str, Any] | None:
-        manifest_path = self._manifest_path(participant_id)
-        if not manifest_path.exists():
+    def _available_sessions(self, participant_id: str) -> list[str]:
+        participant_dir = self.logs_dir / participant_id
+        if not participant_dir.exists() or not participant_dir.is_dir():
+            return []
+
+        sessions = []
+        for candidate in participant_dir.iterdir():
+            if not candidate.is_dir() or not candidate.name.startswith("S"):
+                continue
+            if (candidate / "session_manifest.json").exists():
+                sessions.append(candidate.name)
+
+        def _session_sort_key(session_name: str) -> tuple[int, str]:
+            suffix = session_name[1:]
+            if suffix.isdigit():
+                return (int(suffix), session_name)
+            return (-1, session_name)
+
+        return sorted(sessions, key=_session_sort_key)
+
+    def _resolve_session_id(self, participant_id: str) -> str | None:
+        if self.session_id != "auto":
+            return self.session_id
+
+        sessions = self._available_sessions(participant_id)
+        if not sessions:
             return None
+        return sessions[-1]
+
+    def _load_manifest(self, participant_id: str) -> tuple[dict[str, Any] | None, str | None]:
+        resolved_session = self._resolve_session_id(participant_id)
+        if resolved_session is None:
+            return None, None
+
+        manifest_path = self._manifest_path(participant_id, resolved_session)
+        if not manifest_path.exists():
+            return None, resolved_session
         try:
             with manifest_path.open("r", encoding="utf-8") as fh:
-                return json.load(fh)
+                return json.load(fh), resolved_session
         except json.JSONDecodeError:
-            return None
+            return None, resolved_session
 
     def _outcome_value(self, manifest: dict[str, Any], key: str) -> Any:
         outcomes = manifest.get("outcomes", {})
@@ -172,14 +206,25 @@ class DataPresenceChecker:
         return False, f"{label}: unsupported check"
 
     def validate_participant(self, participant_id: str) -> dict[str, Any]:
-        manifest = self._load_manifest(participant_id)
+        manifest, resolved_session = self._load_manifest(participant_id)
         if manifest is None:
+            if self.session_id == "auto":
+                missing_message = (
+                    f"Missing or invalid manifest for {participant_id}; "
+                    f"no session with session_manifest.json was found"
+                )
+            else:
+                missing_message = (
+                    f"Missing or invalid manifest for {participant_id} "
+                    f"in session {self.session_id}"
+                )
             return {
                 "participant_id": participant_id,
+                "session_id": resolved_session or self.session_id,
                 "ok": False,
                 "missing": ["session_manifest.json"],
                 "missing_labels": ["session_manifest.json"],
-                "messages": [f"Missing or invalid manifest for {participant_id}"],
+                "messages": [missing_message],
             }
 
         missing: list[str] = []
@@ -198,6 +243,7 @@ class DataPresenceChecker:
 
         return {
             "participant_id": participant_id,
+            "session_id": resolved_session or self.session_id,
             "ok": len(missing) == 0,
             "passed": passed,
             "total": len(REQUIRED_OUTCOMES),
@@ -221,6 +267,7 @@ class DataPresenceChecker:
 
 def _print_participant_report(report: dict[str, Any]) -> None:
     participant_id = report["participant_id"]
+    session_id = report.get("session_id", "unknown")
     status = "OK" if report["ok"] else "MISSING DATA"
     passed = report.get("passed", 0)
     total = report.get("total", len(REQUIRED_OUTCOMES))
@@ -231,7 +278,7 @@ def _print_participant_report(report: dict[str, Any]) -> None:
     else:
         missing_text = ", ".join(missing_labels) if missing_labels else "unknown"
         print(f"{participant_id}: Missing data ({passed}/{total}), missing {missing_text}")
-    print(f"DATA CHECK: {participant_id}")
+    print(f"DATA CHECK: {participant_id} ({session_id})")
     print("=" * 70)
     print(f"Status: {status}")
     print(f"Passed: {passed}/{total}")
@@ -257,8 +304,9 @@ def _print_summary(report: dict[str, Any]) -> None:
         status = "OK" if participant_report["ok"] else "MISSING DATA"
         missing_labels = participant_report.get("missing_labels", [])
         missing_text = ", ".join(missing_labels) if missing_labels else "none"
+        session_id = participant_report.get("session_id", "unknown")
         print(
-            f"- {participant_report['participant_id']}: {status} "
+            f"- {participant_report['participant_id']} ({session_id}): {status} "
             f"({participant_report.get('passed', 0)}/{participant_report.get('total', len(REQUIRED_OUTCOMES))}), "
             f"missing: {missing_text}"
         )
@@ -276,8 +324,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--session",
-        default="S01",
-        help="Session ID to check (default: S01)",
+        default="auto",
+        help="Session ID to check (default: auto, uses latest available session)",
     )
 
     args = parser.parse_args()

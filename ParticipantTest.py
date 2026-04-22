@@ -134,8 +134,8 @@ FILTER_CONDITIONS = ["none", "full", "eyetracked"]  # The three conditions
 LATIN_FILTER_ORDERS = [list(p) for p in permutations(FILTER_CONDITIONS)]
 
 # Post-experiment questionnaire URLs (hosted on SurveyXact)
-QUESTIONNAIRE_URL_FULL = "https://www.survey-xact.dk/LinkCollector?key=NRCKWQCGJP95"  # Full questionnaire
-QUESTIONNAIRE_URL_EYES = "https://www.survey-xact.dk/LinkCollector?key=3MPW279ZLN9N"  # Eye-strain focused
+QUESTIONNAIRE_URL_FULL = "https://www.survey-xact.dk/LinkCollector?key=U37XMY3UUJ3P"  # Full questionnaire
+QUESTIONNAIRE_URL_EYES = "https://www.survey-xact.dk/LinkCollector?key=JXESVC9YSJC2"  # Eye-strain focused
 QUESTIONNAIRE_URL_DEMOGRAPHICS = "https://www.survey-xact.dk/LinkCollector?key=N453H41CU1CJ"  # Demographics survey
 QUESTIONNAIRE_TEXT = "Link to questionnaire"
 # Case variants for backwards compatibility

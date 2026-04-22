@@ -10,7 +10,7 @@ Q: The primary purpose of the passage is to
 2: discuss the construction of the Hubble Space Telescrope as a tool for exploring deep space
 3: describe the circumstances which underlay the mid-century national drive toward a large extra-terrestrial observatory
 4: examine difficulties with the precision of manufacture required to produce the Hubble Telescope
-A: 2
+A: 3
 
 Q: It can be inferred that the author regards time travel as 
 1: an effective hook for a work of fiction, but an improbability in the reality of astronomy

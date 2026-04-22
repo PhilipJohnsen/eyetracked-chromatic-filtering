@@ -1,8 +1,71 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from itertools import permutations
 import random
+from pathlib import Path
 from typing import Iterable
+
+
+COUNTERBALANCE_SCHEDULE_PATH = Path(__file__).with_name("counterbalance_schedule.txt")
+COUNTERBALANCE_CYCLE_LENGTH = 24
+
+
+@lru_cache(maxsize=1)
+def _load_counterbalance_schedule() -> dict[int, tuple[int, int]]:
+    """Load participant mapping: participant -> (reading_order_index, latin_variant_index)."""
+    if not COUNTERBALANCE_SCHEDULE_PATH.exists():
+        raise ValueError(
+            f"Counterbalance schedule file not found: {COUNTERBALANCE_SCHEDULE_PATH}"
+        )
+
+    mapping: dict[int, tuple[int, int]] = {}
+    with COUNTERBALANCE_SCHEDULE_PATH.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) != 3:
+                raise ValueError(
+                    "Invalid counterbalance schedule row. Expected 3 comma-separated values: "
+                    f"participant,reading_order_index,latin_variant_index. Got: {line}"
+                )
+
+            participant_number = int(parts[0])
+            reading_order_index = int(parts[1])
+            latin_variant_index = int(parts[2])
+            mapping[participant_number] = (reading_order_index, latin_variant_index)
+
+    if len(mapping) != COUNTERBALANCE_CYCLE_LENGTH:
+        raise ValueError(
+            f"Counterbalance schedule must define exactly {COUNTERBALANCE_CYCLE_LENGTH} participants"
+        )
+
+    return mapping
+
+
+def _participant_cycle_slot(participant_number: int) -> int:
+    return ((participant_number - 1) % COUNTERBALANCE_CYCLE_LENGTH) + 1
+
+
+def build_counterbalance_assignment(participant_number: int) -> tuple[int, int]:
+    schedule = _load_counterbalance_schedule()
+    cycle_slot = _participant_cycle_slot(participant_number)
+    if cycle_slot not in schedule:
+        raise ValueError(f"Counterbalance schedule missing participant slot {cycle_slot}")
+    return schedule[cycle_slot]
+
+
+def build_reading_order_index(participant_number: int) -> int:
+    reading_order_index, _ = build_counterbalance_assignment(participant_number)
+    return reading_order_index
+
+
+def build_latin_variant_index(participant_number: int) -> int:
+    _, latin_variant_index = build_counterbalance_assignment(participant_number)
+    return latin_variant_index
 
 
 def build_practice_trial_file_names(detectability_test_trials: int) -> list[str]:
@@ -41,7 +104,11 @@ def build_paragraph_order(
     practice_paragraph_file: str,
 ) -> list[str]:
     cycle_orders = reading_cycle_orders(paragraph_files, practice_paragraph_file)
-    order_index = (participant_number - 1) % len(cycle_orders)
+    order_index = build_reading_order_index(participant_number)
+    if order_index < 0 or order_index >= len(cycle_orders):
+        raise ValueError(
+            f"Reading order index {order_index} is out of range for {len(cycle_orders)} orders"
+        )
     return [practice_paragraph_file] + cycle_orders[order_index]
 
 
@@ -76,9 +143,10 @@ def validate_counterbalancing_matrix(
         raise ValueError("Counterbalancing validation max_participant must be divisible by 6")
 
     cycle_orders = reading_cycle_orders(paragraph_files, practice_paragraph_file)
+    expected_pair_count_per_cycle = 2
     for cycle_start in range(1, max_participant + 1, 6):
         reading_orders = {
-            tuple(cycle_orders[(pid - 1) % 6])
+            tuple(cycle_orders[build_reading_order_index(pid)])
             for pid in range(cycle_start, cycle_start + 6)
         }
         if len(reading_orders) != 6:
@@ -87,13 +155,31 @@ def validate_counterbalancing_matrix(
             )
 
         latin_orders = {
-            tuple(latin_filter_orders[(pid - 1) % len(latin_filter_orders)])
+            tuple(latin_filter_orders[build_latin_variant_index(pid)])
             for pid in range(cycle_start, cycle_start + 6)
         }
         if len(latin_orders) != 6:
             raise ValueError(
                 f"Latin-order counterbalancing failed for participants {cycle_start}-{cycle_start + 5}"
             )
+
+        pair_counts: dict[tuple[str, str], int] = {}
+        for pid in range(cycle_start, cycle_start + 6):
+            reading_order = cycle_orders[build_reading_order_index(pid)]
+            latin_order = latin_filter_orders[build_latin_variant_index(pid)]
+            for paragraph_file, condition in zip(reading_order, latin_order):
+                key = (paragraph_file, condition)
+                pair_counts[key] = pair_counts.get(key, 0) + 1
+
+        for paragraph_file in {item for order in cycle_orders for item in order}:
+            for condition in {item for order in latin_filter_orders for item in order}:
+                if pair_counts.get((paragraph_file, condition), 0) != expected_pair_count_per_cycle:
+                    raise ValueError(
+                        "Paragraph-condition pairing counterbalancing failed for participants "
+                        f"{cycle_start}-{cycle_start + 5}: "
+                        f"paragraph={paragraph_file}, condition={condition}, "
+                        f"count={pair_counts.get((paragraph_file, condition), 0)}"
+                    )
 
 
 def build_counterbalancing_report_lines(
@@ -109,6 +195,9 @@ def build_counterbalancing_report_lines(
     cycle_orders = reading_cycle_orders(paragraph_files, practice_paragraph_file)
     reading_order_index = int(session_order.get("reading_order_index", -1))
     main_filter_counts = dict(session_order.get("main_filter_counts", {}))
+    comprehension_paragraphs = [str(x) for x in session_order.get("comprehension_paragraphs", [])]
+    comprehension_filter_order = [str(x) for x in session_order.get("comprehension_filter_order", [])]
+    paragraph_condition_pairs = list(zip(comprehension_paragraphs, comprehension_filter_order))
 
     lines: list[str] = []
     lines.append("[counterbalance] participant schedule")
@@ -116,12 +205,14 @@ def build_counterbalancing_report_lines(
         "[counterbalance] participant="
         f"{participant_number} "
         f"reading_order_index={reading_order_index + 1}/6 "
-        f"reading_order={session_order.get('comprehension_paragraphs', [])} "
+        f"reading_order={comprehension_paragraphs} "
+        f"reading_condition_pairs={paragraph_condition_pairs} "
         f"latin_variant={latin_variant_index + 1}/6 "
         f"main_detectability_counts={main_filter_counts}"
     )
 
     expected_repetitions = max_participant // len(latin_filter_orders)
+    expected_pair_count = max_participant // 3
 
     latin_counts: dict[tuple[str, ...], int] = {
         tuple(order): 0 for order in latin_filter_orders
@@ -131,13 +222,23 @@ def build_counterbalancing_report_lines(
     }
 
     for pid in range(1, max_participant + 1):
-        latin_order = tuple(latin_filter_orders[(pid - 1) % len(latin_filter_orders)])
-        reading_order = tuple(cycle_orders[(pid - 1) % len(cycle_orders)])
+        latin_order = tuple(latin_filter_orders[build_latin_variant_index(pid)])
+        reading_order = tuple(cycle_orders[build_reading_order_index(pid)])
         latin_counts[latin_order] = latin_counts.get(latin_order, 0) + 1
         reading_counts[reading_order] = reading_counts.get(reading_order, 0) + 1
 
     latin_ok = all(count == expected_repetitions for count in latin_counts.values())
     order_ok = all(count == expected_repetitions for count in reading_counts.values())
+
+    pair_counts: dict[tuple[str, str], int] = {}
+    for pid in range(1, max_participant + 1):
+        reading_order = cycle_orders[build_reading_order_index(pid)]
+        latin_order = latin_filter_orders[build_latin_variant_index(pid)]
+        for paragraph_file, condition in zip(reading_order, latin_order):
+            key = (paragraph_file, condition)
+            pair_counts[key] = pair_counts.get(key, 0) + 1
+
+    pair_ok = all(count == expected_pair_count for count in pair_counts.values())
 
     lines.append(f"\n[counterbalance] Latin-balanced for {max_participant}: {latin_ok}")
     for order, count in sorted(latin_counts.items()):
@@ -146,6 +247,13 @@ def build_counterbalancing_report_lines(
     lines.append(f"[counterbalance] Order-balanced for {max_participant}: {order_ok}")
     for order, count in sorted(reading_counts.items()):
         lines.append(f"[counterbalance]   reading_order={list(order)} count={count}")
+
+    lines.append(f"[counterbalance] Paragraph-condition balanced for {max_participant}: {pair_ok}")
+    lines.append(f"[counterbalance] Expected pair count per paragraph-condition: {expected_pair_count}")
+    for pair, count in sorted(pair_counts.items()):
+        lines.append(
+            f"[counterbalance]   paragraph={pair[0]} condition={pair[1]} count={count}"
+        )
 
     return lines
 
@@ -175,7 +283,8 @@ def prepare_session_order(
         raise ValueError(
             f"Reading counterbalancing requires exactly 3 main paragraphs; found {len(comprehension_paragraphs)}"
         )
-    reading_order_index = (participant_number - 1) % 6
+    comprehension_filter_order = latin_filter_orders[latin_variant_index][:len(comprehension_paragraphs)]
+    reading_order_index = build_reading_order_index(participant_number)
 
     practice_trial_names = build_practice_trial_file_names(detectability_test_trials)
     main_trial_names = build_main_trial_file_names(detectability_test_trials, detectability_total_trials)
@@ -276,6 +385,7 @@ def prepare_session_order(
         "paragraph_order": paragraph_order,
         "practice_paragraph": practice_paragraph_file,
         "comprehension_paragraphs": comprehension_paragraphs,
+        "comprehension_filter_order": comprehension_filter_order,
         "practice_trial_id_set": practice_trial_ids,
         "block_trial_id_sets": block_trial_id_sets,
         "practice_trial_files": practice_trial_files,

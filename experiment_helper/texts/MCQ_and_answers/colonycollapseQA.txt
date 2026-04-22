@@ -17,4 +17,4 @@ Q: Based on the passage, what does CCD cause bees to do?
 2: Bees bring a virus back to the hive
 3: Bees become very active and exhausted
 4: Bees suddenly, inexplicably attack their hive mates
-A: 2
+A: 1

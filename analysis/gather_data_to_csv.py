@@ -328,6 +328,42 @@ def _collect_questionnaire_data(
 	return merged
 
 
+def _collect_text_conditions_by_participant(
+	logs_root: Path,
+	warnings: List[str],
+) -> Dict[int, Dict[str, str]]:
+	by_participant: Dict[int, Dict[str, str]] = {}
+
+	for participant_id, session_id, session_dir in _find_session_dirs(logs_root):
+		participant_number = _participant_number_from_id(participant_id)
+		if participant_number is None:
+			continue
+
+		segments_rows = _load_csv_rows(session_dir / "segments.csv")
+		if not segments_rows:
+			continue
+
+		reading_lookup = _build_reading_lookup(segments_rows)
+		if not reading_lookup:
+			continue
+
+		participant_map = by_participant.setdefault(participant_number, {})
+		for text_name in TEXT_ORDER:
+			condition_value = str(reading_lookup.get(text_name, {}).get("condition", "")).strip().lower()
+			if condition_value not in CONDITIONS:
+				continue
+
+			previous = participant_map.get(text_name)
+			if previous and previous != condition_value:
+				warnings.append(
+					f"[segments] participant={participant_id} text={text_name} condition changed {previous} -> {condition_value} (using latest from {session_id})"
+				)
+
+			participant_map[text_name] = condition_value
+
+	return by_participant
+
+
 def _find_session_dirs(logs_root: Path) -> Iterable[Tuple[str, str, Path]]:
 	for participant_dir in sorted(logs_root.glob("P*")):
 		if not participant_dir.is_dir():
@@ -634,6 +670,7 @@ def build_questionnaire_dataset(
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
 	warnings: List[str] = []
 	questionnaire_by_participant = _collect_questionnaire_data(logs_root, warnings)
+	text_conditions_by_participant = _collect_text_conditions_by_participant(logs_root, warnings)
 	rows: List[Dict[str, Any]] = []
 
 	for participant_number in sorted(questionnaire_by_participant.keys()):
@@ -642,6 +679,11 @@ def build_questionnaire_dataset(
 			"Participant ID": _participant_id_from_number(participant_number),
 			"Participant number": str(participant_number),
 		}
+
+		participant_text_conditions = text_conditions_by_participant.get(participant_number, {})
+		for text_name in TEXT_ORDER:
+			row[f'Text filtering condition "{text_name}"'] = participant_text_conditions.get(text_name, "")
+
 		row.update(payload)
 		rows.append(row)
 

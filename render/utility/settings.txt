@@ -41,6 +41,6 @@ log_path = "gaze_log.csv"
 
 # Luminance correction for peripheral blur yellowing [0.0, 1.0].
 # 0.0 = no correction (full yellow cast),  1.0 = fully luminance-preserving.
-lum_correction = 0.0
+lum_correction = 1.0
 #Kept OFF for now, as it casts very visible yellowing visual artifacts without improving readability or usability
 #Thus keeping it OFF does not preserve luminance completely, but keeps colour channels from oversaturating beyond defensible levels

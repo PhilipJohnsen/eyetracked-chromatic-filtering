@@ -19,6 +19,7 @@ BaseScreen          â€” shared root/helper access, panel construction
 
 from __future__ import annotations
 
+import argparse
 import csv
 from dataclasses import asdict
 from itertools import permutations
@@ -36,6 +37,7 @@ from experiment_helper.content_loading_experiment import ContentLoader
 from experiment_helper.scheduling_experiment import (
     build_counterbalancing_report_lines,
     build_latin_filter_order,
+    build_latin_variant_index,
     build_main_trial_file_names,
     build_paragraph_order,
     build_practice_trial_file_names,
@@ -134,8 +136,8 @@ FILTER_CONDITIONS = ["none", "full", "eyetracked"]  # The three conditions
 LATIN_FILTER_ORDERS = [list(p) for p in permutations(FILTER_CONDITIONS)]
 
 # Post-experiment questionnaire URLs (hosted on SurveyXact)
-QUESTIONNAIRE_URL_FULL = "https://www.survey-xact.dk/LinkCollector?key=NRCKWQCGJP95"  # Full questionnaire
-QUESTIONNAIRE_URL_EYES = "https://www.survey-xact.dk/LinkCollector?key=3MPW279ZLN9N"  # Eye-strain focused
+QUESTIONNAIRE_URL_FULL = "https://www.survey-xact.dk/LinkCollector?key=U37XMY3UUJ3P"  # Full questionnaire
+QUESTIONNAIRE_URL_EYES = "https://www.survey-xact.dk/LinkCollector?key=JXESVC9YSJC2"  # Eye-strain focused
 QUESTIONNAIRE_URL_DEMOGRAPHICS = "https://www.survey-xact.dk/LinkCollector?key=N453H41CU1CJ"  # Demographics survey
 QUESTIONNAIRE_TEXT = "Link to questionnaire"
 # Case variants for backwards compatibility
@@ -187,7 +189,7 @@ class ParticipantExperiment:
             app.close()  # Clean up resources
         """
     
-    def __init__(self) -> None:
+    def __init__(self, participant_number: int | None = None) -> None:
         """Initialize window, state, experiment order, logging, and screen instances."""
             # Create and configure fullscreen window
         self.root = tk.Tk()
@@ -216,10 +218,16 @@ class ParticipantExperiment:
         self.last_blur_start_msg = ""
             # Participant identifier and experiment parameters
         self.base_dir = Path(__file__).resolve().parent
-            # Resolve participant number from CLI --participant=N or env var
-        self.participant_number = self._resolve_participant_number()
+            # Resolve participant number from caller, CLI --participant=N, or env var.
+        try:
+            self.participant_number = (
+                participant_number if participant_number is not None else self._resolve_participant_number()
+            )
+        except ValueError as exc:
+            self._show_fatal_startup_error(str(exc))
+            raise ExperimentContentError(str(exc)) from exc
             # Determine Latin-square variant based on participant number
-        self.latin_variant_index = (self.participant_number - 1) % len(LATIN_FILTER_ORDERS)
+        self.latin_variant_index = build_latin_variant_index(self.participant_number)
             # Build session order: which tasks, in what order, with what parameters
         try:
             self.session_order: dict[str, object] = self._prepare_session_order()
@@ -348,8 +356,10 @@ class ParticipantExperiment:
 
         if env_raw.isdigit() and int(env_raw) > 0:
             return int(env_raw)
-            # Default to participant 1 if no number provided
-        return 1
+        raise ValueError(
+            "Participant number is required. Start the experiment with --participant <number> "
+            "or set PARTICIPANT_NUMBER."
+        )
 
     def _practice_trial_file_names(self) -> list[str]:
         """Return list of practice trial filenames (trial_01.txt through trial_06.txt)."""
@@ -2067,7 +2077,10 @@ def main() -> int:
     """
     app: ParticipantExperiment | None = None
     try:
-        app = ParticipantExperiment()
+        parser = argparse.ArgumentParser(description="Run the participant-facing experiment")
+        parser.add_argument("--participant", type=int, default=None, help="Participant number for counterbalancing")
+        args = parser.parse_args()
+        app = ParticipantExperiment(participant_number=args.participant)
         return app.run()
     except ExperimentContentError as exc:
         print(f"[fatal] {exc}")

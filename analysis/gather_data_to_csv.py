@@ -113,6 +113,48 @@ def _normalize_header(header: str) -> str:
 def _normalize_key(header: str) -> str:
 	return _normalize_header(header).lower()
 
+def _load_counterbalance_schedule(schedule_path: Path) -> Dict[int, Dict[str, str]]:
+    """
+    Reads counterbalance_scheduling.txt and returns a mapping of:
+        participant_number -> {text_name: condition}
+    
+    Uses latin_variant_index to assign conditions to texts by position,
+    and reading_order_index to know which text was in which slot.
+    """
+    from itertools import permutations
+
+    TEXT_PERMS = list(permutations(TEXT_ORDER))           # 6 orderings of texts
+    COND_PERMS = list(permutations(CONDITIONS))           # 6 orderings of conditions
+
+    schedule: Dict[int, Dict[str, str]] = {}
+
+    if not schedule_path.exists():
+        return schedule
+
+    with schedule_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(",")
+            if len(parts) != 3:
+                continue
+            try:
+                participant_number = int(parts[0])
+                reading_order_index = int(parts[1])
+                latin_variant_index = int(parts[2])
+            except ValueError:
+                continue
+
+            texts = TEXT_PERMS[reading_order_index]   # e.g. ('Salt', 'Hubble', 'Bees')
+            conds = COND_PERMS[latin_variant_index]   # e.g. ('none', 'full', 'eyetracked')
+
+            # Map each text to its condition for this participant
+            schedule[participant_number] = {
+                texts[i]: conds[i] for i in range(len(texts))
+            }
+
+    return schedule
 
 def _clean_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
 	cleaned: List[Dict[str, str]] = []
@@ -377,53 +419,62 @@ def _find_session_dirs(logs_root: Path) -> Iterable[Tuple[str, str, Path]]:
 
 
 def _build_reading_lookup(
-	segments_rows: List[Dict[str, str]],
+    segments_rows: List[Dict[str, str]],
+    text_to_condition: Optional[Dict[str, str]] = None,  # NEW parameter
 ) -> Dict[str, Dict[str, Optional[float]]]:
-	by_index: Dict[str, Dict[str, Any]] = {}
+    by_index: Dict[str, Dict[str, Any]] = {}
 
-	for row in segments_rows:
-		metrics_raw = row.get("metrics_json", "")
-		try:
-			metrics = json.loads(metrics_raw) if metrics_raw else {}
-		except json.JSONDecodeError:
-			metrics = {}
+    for row in segments_rows:
+        metrics_raw = row.get("metrics_json", "")
+        try:
+            metrics = json.loads(metrics_raw) if metrics_raw else {}
+        except json.JSONDecodeError:
+            metrics = {}
 
-		name = row.get("segment_name", "")
-		if name.startswith("reading_paragraph_"):
-			idx = name.split("reading_paragraph_", 1)[1]
-			by_index.setdefault(idx, {})
-			by_index[idx]["paragraph_file"] = str(metrics.get("paragraph_file", "")).lower()
-			by_index[idx]["condition"] = str(metrics.get("condition", "")).lower()
-			by_index[idx]["reading_time_sec"] = _safe_float(metrics.get("reading_time_sec"))
+        name = row.get("segment_name", "")
+        if name.startswith("reading_paragraph_"):
+            idx = name.split("reading_paragraph_", 1)[1]
+            by_index.setdefault(idx, {})
+            by_index[idx]["paragraph_file"] = str(metrics.get("paragraph_file", "")).lower()
+            # Only read condition from segments.csv if no schedule was provided
+            if text_to_condition is None:
+                by_index[idx]["condition"] = str(metrics.get("condition", "")).lower()
+            by_index[idx]["reading_time_sec"] = _safe_float(metrics.get("reading_time_sec"))
 
-		if name.startswith("mcq_reading") and name.endswith("-mcq"):
-			idx = name.split("mcq_reading", 1)[1].split("-mcq", 1)[0]
-			by_index.setdefault(idx, {})
-			by_index[idx]["comprehension_pct"] = _safe_float(metrics.get("accuracy_pct"))
+        if name.startswith("mcq_reading") and name.endswith("-mcq"):
+            idx = name.split("mcq_reading", 1)[1].split("-mcq", 1)[0]
+            by_index.setdefault(idx, {})
+            by_index[idx]["comprehension_pct"] = _safe_float(metrics.get("accuracy_pct"))
 
-	lookup: Dict[str, Dict[str, Optional[float]]] = {}
-	for idx_data in by_index.values():
-		file_name = str(idx_data.get("paragraph_file", "")).lower()
-		if not file_name:
-			continue
+    lookup: Dict[str, Dict[str, Optional[float]]] = {}
+    for idx_data in by_index.values():
+        file_name = str(idx_data.get("paragraph_file", "")).lower()
+        if not file_name:
+            continue
 
-		text_name = None
-		for label, expected_file in TEXT_TO_FILE.items():
-			if expected_file == file_name:
-				text_name = label
-				break
+        text_name = None
+        for label, expected_file in TEXT_TO_FILE.items():
+            if expected_file == file_name:
+                text_name = label
+                break
 
-		if not text_name:
-			continue
+        if not text_name:
+            continue
 
-		lookup[text_name] = {
-			"reading_time_sec": idx_data.get("reading_time_sec"),
-			"comprehension_pct": idx_data.get("comprehension_pct"),
-			"condition": idx_data.get("condition"),
-			"paragraph_index": _safe_int(idx_data.get("paragraph_index")),
-		}
-	return lookup
+        # Resolve condition from schedule if available, else from segments.csv
+        if text_to_condition is not None:
+            condition = text_to_condition.get(text_name, "")
+        else:
+            condition = str(idx_data.get("condition", "")).lower()
 
+        lookup[text_name] = {
+            "reading_time_sec": idx_data.get("reading_time_sec"),
+            "comprehension_pct": idx_data.get("comprehension_pct"),
+            "condition": condition,
+            "paragraph_index": _safe_int(idx_data.get("paragraph_index")),
+        }
+
+    return lookup
 
 def _extract_paragraph_window_labels(
 	segments_rows: List[Dict[str, str]],
@@ -635,34 +686,51 @@ def _build_condition_row(
 
 
 def build_reading_dataset(logs_root: Path) -> List[Dict[str, Any]]:
-	rows: List[Dict[str, Any]] = []
+    rows: List[Dict[str, Any]] = []
 
-	for participant_id, session_id, session_dir in _find_session_dirs(logs_root):
-		segments_rows = _load_csv_rows(session_dir / "segments.csv")
-		eye_events_rows = _load_csv_rows(session_dir / "eye_events.csv")
-		detectability_rows = _load_csv_rows(session_dir / "detectability_trials.csv")
+    # Load schedule once — used instead of segments.csv condition field
+    schedule_path = logs_root.parent / "experiment_helper" / "counterbalance_scheduling.txt"
+    schedule = _load_counterbalance_schedule(schedule_path)
 
-		if not segments_rows:
-			continue
+    for participant_id, session_id, session_dir in _find_session_dirs(logs_root):
+        segments_rows = _load_csv_rows(session_dir / "segments.csv")
+        eye_events_rows = _load_csv_rows(session_dir / "eye_events.csv")
+        detectability_rows = _load_csv_rows(session_dir / "detectability_trials.csv")
 
-		reading_lookup = _build_reading_lookup(segments_rows)
-		window_labels_by_text = _extract_paragraph_window_labels(segments_rows)
-		eye_stats = _aggregate_eye_events(eye_events_rows, window_labels_by_text)
-		detectability = _aggregate_detectability(detectability_rows)
+        if not segments_rows:
+            continue
 
-		for condition in CONDITIONS:
-			rows.append(
-				_build_condition_row(
-					participant_id=participant_id,
-					session_id=session_id,
-					condition=condition,
-					reading_lookup=reading_lookup,
-					eye_stats=eye_stats,
-					detectability=detectability,
-				)
-			)
+        participant_number = _participant_number_from_id(participant_id)
 
-	return rows
+        # Resolve condition->text map from schedule, fall back to segments.csv if missing
+        if participant_number in schedule:
+            text_to_condition = schedule[participant_number]
+        else:
+            # Fallback: derive from segments.csv as before (unreliable, logged)
+            reading_lookup_raw = _build_reading_lookup(segments_rows)
+            text_to_condition = {
+                text: str(data.get("condition", "")).strip().lower()
+                for text, data in reading_lookup_raw.items()
+            }
+
+        reading_lookup = _build_reading_lookup(segments_rows, text_to_condition)
+        window_labels_by_text = _extract_paragraph_window_labels(segments_rows)
+        eye_stats = _aggregate_eye_events(eye_events_rows, window_labels_by_text)
+        detectability = _aggregate_detectability(detectability_rows)
+
+        for condition in CONDITIONS:
+            rows.append(
+                _build_condition_row(
+                    participant_id=participant_id,
+                    session_id=session_id,
+                    condition=condition,
+                    reading_lookup=reading_lookup,
+                    eye_stats=eye_stats,
+                    detectability=detectability,
+                )
+            )
+
+    return rows
 
 
 def build_questionnaire_dataset(

@@ -7,6 +7,82 @@ from typing import Dict, Tuple, List, Any
 import warnings
 
 
+def print_rm_analysis_report(
+    result: Dict[str, Any],
+    analysis_title: str,
+    conditions: List[str],
+    effect_label: str,
+    alpha: float = 0.05,
+) -> None:
+    """Print analysis output using the notebook schema ([ANALYSIS]/[ASSUMPTION]/[RESULT])."""
+
+    ac = result.get("assumptions_checked", {})
+    sph = ac.get("sphericity_details", {})
+
+    print(f"[ANALYSIS] {analysis_title}")
+    print(
+        f"[ANALYSIS] Subjects: {result.get('n_subjects_final', 'n/a')} used, "
+        f"{result.get('n_subjects_initial', 0) - result.get('n_subjects_final', 0)} dropped "
+        f"(listwise deletion of incomplete cases)")
+    print(f"[ANALYSIS] Conditions: {conditions}")
+    if result.get("dropped_subjects"):
+        print(f"[ANALYSIS] Dropped subjects: {result['dropped_subjects']}")
+
+    print()
+    print("[ASSUMPTION] Normality (Shapiro-Wilk on pairwise differences):")
+    normality_notes = [
+        n for n in ac.get("notes", [])
+        if "Normality" in n or "normality" in n or "Shapiro" in n
+    ]
+    if normality_notes:
+        for note in normality_notes:
+            print(f"[ASSUMPTION]   {note}")
+    else:
+        print(f"[ASSUMPTION]   All pairwise differences passed normality (p >= {alpha:.2f})")
+
+    print("[ASSUMPTION] Sphericity (Mauchly's test):")
+    print(
+        f"[ASSUMPTION]   W = {sph.get('mauchly_stat', float('nan')):.6f}, "
+        f"p = {sph.get('mauchly_p', float('nan')):.6f}")
+    print(f"[ASSUMPTION]   Sphericity assumed: {sph.get('sphericity_assumed', 'unknown')}")
+
+    if ac.get("normality_violated", False) or not ac.get("sphericity_verified", False):
+        print("[ASSUMPTION] One or more assumptions violated - falling back to Friedman test")
+    else:
+        print("[ASSUMPTION] All assumptions met - proceeding with RM ANOVA")
+
+    print()
+    print(f"[RESULT] Test used: {result.get('test', 'unknown')}")
+    if result.get("test") == "RM ANOVA":
+        df_b, df_e = result.get("df", (float("nan"), float("nan")))
+        print(f"[RESULT] F({df_b}, {df_e}) = {result.get('statistic', float('nan')):.4f}, p = {result.get('p_value', float('nan')):.4f}")
+    else:
+        print(f"[RESULT] chi2({result.get('df', 'nan')}) = {result.get('statistic', float('nan')):.4f}, p = {result.get('p_value', float('nan')):.4f}")
+
+    if result.get("significant", False):
+        print(f"[RESULT] Significant effect of condition on {effect_label} (p < {alpha:.2f})")
+    else:
+        print(f"[RESULT] No significant effect of condition on {effect_label} (p >= {alpha:.2f})")
+
+    post_hoc = result.get("post_hoc")
+    if post_hoc is not None:
+        label_map = {
+            "g1 vs g2": f"{conditions[0]} vs {conditions[1]}",
+            "g1 vs g3": f"{conditions[0]} vs {conditions[2]}",
+            "g2 vs g3": f"{conditions[1]} vs {conditions[2]}",
+        }
+        print()
+        print(f"[RESULT] Post-hoc: {post_hoc['method']}, Bonferroni alpha = {post_hoc['bonferroni_alpha']:.4f}")
+        for pair, vals in post_hoc.get("comparisons", {}).items():
+            label = label_map.get(pair, pair)
+            stat_key = "t_statistic" if "t_statistic" in vals else "z_statistic"
+            stat_name = "t" if "t_statistic" in vals else "W"
+            sig = "significant" if vals.get("significant", False) else "not significant"
+            print(f"[RESULT]   {label}: {stat_name} = {vals[stat_key]:.4f}, p = {vals['p_value']:.4f} ({sig})")
+    else:
+        print("[RESULT] No post-hoc tests run (main test not significant)")
+
+
 def run_rm_anova_or_friedman(
     df: pd.DataFrame,
     subject_col: str,
@@ -44,6 +120,7 @@ def run_rm_anova_or_friedman(
         - 'statistic': float - Test statistic (F for ANOVA, chi2 for Friedman)
         - 'df': tuple - Degrees of freedom
         - 'p_value': float - Probability value
+
         - 'significant': bool - Whether p_value < alpha
         - 'post_hoc': dict or None - Post-hoc test results if significant
         - 'assumptions_checked': dict - Details about assumptions
@@ -217,11 +294,11 @@ def _run_rm_anova(g1: np.ndarray, g2: np.ndarray, g3: np.ndarray, alpha: float) 
     
     n_subjects = len(g1)
     n_conditions = 3
-    
+
     # Stack all observations
     all_data = np.vstack([g1, g2, g3])  # shape: (3, n_subjects)
     grand_mean = np.mean(all_data)
-    
+
     # Condition means
     condition_means = np.array([np.mean(g1), np.mean(g2), np.mean(g3)])
     
@@ -493,26 +570,7 @@ def _test_sphericity_greenhouse_geisser(
 
     # Sphericity is assumed if p-value >= 0.05
     sphericity_assumed = mauchly_p >= 0.05
-    mauchly_significant = mauchly_p < 0.05
-    
-    # Print statistical significance
-    print("\n" + "="*60)
-    print("MAUCHLY'S TEST FOR SPHERICITY")
-    print("="*60)
-    print(f"Mauchly's W statistic: {_format_stat(mauchly_stat, '{:.6f}')}")
-    print(f"P-value: {_format_stat(mauchly_p, '{:.6f}')}")
-    
-    if mauchly_significant:
-        print(f"✗ SIGNIFICANT (p < 0.05): Sphericity is VIOLATED")
-        print(f"  → Interpretation: The assumption of equal variances of differences")
-        print(f"                   between condition pairs is NOT satisfied.")
-        print(f"  → Recommendation: Consider using Friedman test (non-parametric)")
-    else:
-        print(f"✓ NOT SIGNIFICANT (p >= 0.05): Sphericity is ASSUMED")
-        print(f"  → Interpretation: The assumption of equal variances of differences")
-        print(f"                   between condition pairs is satisfied.")
-        print(f"  → Recommendation: RM ANOVA can be used safely.")
-    
+    mauchly_significant = mauchly_p < 0.05 
  
     return {
         'mauchly_stat':       mauchly_stat,

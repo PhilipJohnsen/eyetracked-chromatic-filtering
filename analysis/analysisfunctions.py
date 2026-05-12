@@ -580,3 +580,79 @@ def _test_sphericity_greenhouse_geisser(
         'epsilon_gg':         None,   # not available in this pingouin version
         'epsilon_hf':         None,
     }
+
+
+
+
+def run_friedman_direct(
+    df: pd.DataFrame,
+    subject_col: str,
+    condition_col: str,
+    value_col: str,
+    alpha: float = 0.05
+) -> Dict[str, Any]:
+    """
+    Runs Friedman test directly, skipping assumption checks.
+    Use for ordinal / non-parametric measures (e.g. NASA-TLX 20-point scale)
+    where parametric assumptions are not justified by design.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    subject_col : str
+    condition_col : str
+    value_col : str
+    alpha : float
+
+    Returns
+    -------
+    dict — same schema as run_rm_anova_or_friedman for compatibility
+    """
+    df_wide = df.pivot_table(
+        index=subject_col,
+        columns=condition_col,
+        values=value_col,
+        aggfunc="mean"
+    )
+
+    conditions = sorted(df_wide.columns.tolist())
+    if len(conditions) != 3:
+        raise ValueError(
+            f"Expected exactly 3 conditions, found {len(conditions)}: {conditions}"
+        )
+
+    n_subjects_initial = len(df_wide)
+
+    # Listwise deletion
+    rows_with_missing = df_wide.isna().any(axis=1)
+    dropped_subjects  = df_wide[rows_with_missing].index.tolist()
+    df_wide           = df_wide.dropna()
+    n_subjects_final  = len(df_wide)
+
+    if dropped_subjects:
+        warnings.warn(
+            f"Dropped {len(dropped_subjects)} subjects with missing values: {dropped_subjects}",
+            UserWarning
+        )
+
+    g1 = df_wide[conditions[0]].values
+    g2 = df_wide[conditions[1]].values
+    g3 = df_wide[conditions[2]].values
+
+    result = _run_friedman_test(g1, g2, g3, alpha)
+
+    if result["significant"]:
+        result["post_hoc"] = _post_hoc_wilcoxon(g1, g2, g3, alpha)
+    else:
+        result["post_hoc"] = None
+
+    result["assumptions_checked"] = {
+        "normality_violated": None,
+        "sphericity_verified": None,
+        "notes": ["Friedman test used directly — assumption checks skipped by design (ordinal scale)"]
+    }
+    result["n_subjects_initial"] = n_subjects_initial
+    result["n_subjects_final"]   = n_subjects_final
+    result["dropped_subjects"]   = dropped_subjects
+
+    return result

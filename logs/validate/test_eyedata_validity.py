@@ -38,8 +38,8 @@ US_PER_SECOND = 1_000_000.0
 class Thresholds:
 	# Duration sanity thresholds (ms)
 	blink_duration_ms_max: float = 2000.0
-	saccade_duration_ms_max: float = 15000.0
-	fixation_duration_ms_max: float = 10000.0
+	saccade_duration_ms_max: float = 500.0
+	fixation_duration_ms_max: float = 5000.0
 
 	# Burst sanity checks: count within short window
 	burst_window_seconds: float = 2.0

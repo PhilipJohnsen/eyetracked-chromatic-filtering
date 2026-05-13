@@ -8,6 +8,13 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+##CLEANING SETTINGS##================================
+EVENT_HARDPASS_MAX_DURATION_MS: Dict[str, float] = {
+	"blink": 2000.0,
+	"fixation": 5000.0,
+	"saccade": 500.0,
+}
+#CLEANING SETTINGS END#
 
 CONDITIONS: Tuple[str, ...] = ("none", "full", "eyetracked")
 TEXT_ORDER: Tuple[str, ...] = ("Salt", "Hubble", "Bees")
@@ -15,6 +22,16 @@ TEXT_TO_FILE: Dict[str, str] = {
 	"Salt": "salt.txt",
 	"Hubble": "hubble.txt",
 	"Bees": "colonycollapse.txt",
+}
+# Counterbalance schema: Group -> Session -> (text, condition)
+# This is the determinant of reading order per the experimental design
+COUNTERBALANCE_SCHEMA: Dict[str, Dict[int, Tuple[str, str]]] = {
+	"A": {1: ("Bees", "none"), 2: ("Hubble", "full"), 3: ("Salt", "eyetracked")},
+	"B": {1: ("Bees", "none"), 2: ("Hubble", "eyetracked"), 3: ("Salt", "full")},
+	"C": {1: ("Hubble", "full"), 2: ("Salt", "none"), 3: ("Bees", "eyetracked")},
+	"D": {1: ("Salt", "full"), 2: ("Bees", "eyetracked"), 3: ("Hubble", "none")},
+	"E": {1: ("Hubble", "eyetracked"), 2: ("Salt", "none"), 3: ("Bees", "full")},
+	"F": {1: ("Salt", "eyetracked"), 2: ("Bees", "full"), 3: ("Hubble", "none")},
 }
 EVENT_TYPES: Tuple[str, ...] = ("saccade", "fixation", "blink")
 TEXT_TO_TEXT_LABEL: Dict[str, str] = {
@@ -27,8 +44,8 @@ TEXT_TO_TEXT_LABEL: Dict[str, str] = {
 TEXT_NUMERIC_MAP: Dict[str, float] = {
 	"very low": 1.0,
 	"very high": 21.0,
-	"perfect": 21.0,
-	"failure": 1.0,
+	"perfect": 1.0, #NASA TLX is upwards on this question
+	"failure": 21.0, #Thus failure is 21.0
 }
 QUESTIONNAIRE_EXCLUDED_COLUMNS: Tuple[str, ...] = ("", "fill in your participant number below", "what is your participant number?", "which text did you just read?")
 
@@ -113,24 +130,26 @@ def _normalize_header(header: str) -> str:
 def _normalize_key(header: str) -> str:
 	return _normalize_header(header).lower()
 
+def _participant_group_from_number(participant_number: int) -> str:
+	"""Map participant number to counterbalance group (A-F)."""
+	group_index = (participant_number - 1) % 6
+	return chr(ord("A") + group_index)
+
+
 def _load_counterbalance_schedule(schedule_path: Path) -> Dict[int, Dict[str, str]]:
     """
-    Reads counterbalance_scheduling.txt and returns a mapping of:
-        participant_number -> {text_name: condition}
+    Builds a mapping of participant_number -> {text_name: condition} using the
+    COUNTERBALANCE_SCHEMA as the source of truth.
     
-    Uses latin_variant_index to assign conditions to texts by position,
-    and reading_order_index to know which text was in which slot.
+    The schedule file is used only to validate that participants are registered;
+    the actual text-condition assignments come from COUNTERBALANCE_SCHEMA.
     """
-    from itertools import permutations
-
-    TEXT_PERMS = list(permutations(TEXT_ORDER))           # 6 orderings of texts
-    COND_PERMS = list(permutations(CONDITIONS))           # 6 orderings of conditions
-
     schedule: Dict[int, Dict[str, str]] = {}
 
     if not schedule_path.exists():
         return schedule
 
+    # Collect all participant numbers from the schedule file
     with schedule_path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -141,18 +160,21 @@ def _load_counterbalance_schedule(schedule_path: Path) -> Dict[int, Dict[str, st
                 continue
             try:
                 participant_number = int(parts[0])
-                reading_order_index = int(parts[1])
-                latin_variant_index = int(parts[2])
             except ValueError:
                 continue
 
-            texts = TEXT_PERMS[reading_order_index]   # e.g. ('Salt', 'Hubble', 'Bees')
-            conds = COND_PERMS[latin_variant_index]   # e.g. ('none', 'full', 'eyetracked')
+            # Determine group from participant number
+            group = _participant_group_from_number(participant_number)
+            group_schema = COUNTERBALANCE_SCHEMA.get(group, {})
 
-            # Map each text to its condition for this participant
-            schedule[participant_number] = {
-                texts[i]: conds[i] for i in range(len(texts))
-            }
+            # Build text -> condition mapping from schema across all sessions
+            text_to_condition: Dict[str, str] = {}
+            for session_num in range(1, 4):
+                text, condition = group_schema.get(session_num, ("", ""))
+                if text and condition:
+                    text_to_condition[text] = condition
+
+            schedule[participant_number] = text_to_condition
 
     return schedule
 
@@ -271,7 +293,7 @@ def _load_nasa_and_text_eyestrain(
 	nasa_fields = [
 		"How mentally demanding was the task?",
 		"How Physically demanding was the task?",
-		"How hurried or rushed was the pace of the task? - Sæt kun 1 markering",
+		"How hurried or rushed was the pace of the task? - Saet kun 1 markering",
 		"How successful were you in acomplishing what you were asked to do?",
 		"How hard did you have to work to accomplish your level of performance?",
 		"How insecure, discouraged, irritated, stressed, and annoyed were you?",
@@ -306,7 +328,7 @@ def _load_nasa_and_text_eyestrain(
 				text_label=text_label,
 				warnings=warnings,
 			)
-			out_for_text[f"NASA {field} \"{text_label}\""] = _format_number(numeric)
+			out_for_text[f"NASA {field} \"{text_label}\""] = _format_number(numeric, decimals=0)
 
 		nasa_values: List[float] = []
 		for field in nasa_fields:
@@ -314,7 +336,8 @@ def _load_nasa_and_text_eyestrain(
 			if v is not None:
 				nasa_values.append(v)
 		out_for_text[f"NASA TLX overall \"{text_label}\""] = _format_number(
-			(sum(nasa_values) / len(nasa_values)) if nasa_values else None
+			(sum(nasa_values) / len(nasa_values)) if nasa_values else None,
+			decimals=0,
 		)
 
 		for key, raw in row.items():
@@ -336,7 +359,7 @@ def _load_nasa_and_text_eyestrain(
 				text_label=text_label,
 				warnings=warnings,
 			)
-			out_for_text[f"Text questionnaire {key} \"{text_label}\""] = _format_number(numeric)
+			out_for_text[f"Text questionnaire {key} \"{text_label}\""] = _format_number(numeric, decimals=0)
 
 	final: Dict[int, Dict[str, str]] = {}
 	for number, per_text in by_participant.items():
@@ -526,6 +549,10 @@ def _aggregate_eye_events(
 			continue
 
 		duration_ms = _safe_float(row.get("duration_ms"))
+		max_duration_ms = EVENT_HARDPASS_MAX_DURATION_MS.get(event_type)
+		if duration_ms is not None and max_duration_ms is not None and duration_ms > max_duration_ms:
+			print(f"[CSV] Skipping eye event: participant={row.get('participant_id', 'Unknown')} type={event_type} duration {duration_ms}ms exceeds hard pass threshold of {max_duration_ms}ms")
+			continue
 		bucket = result[text_name][event_type]
 		bucket["count"] = int(bucket["count"] or 0) + 1
 		if duration_ms is not None:
